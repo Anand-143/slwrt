@@ -1,0 +1,1185 @@
+#############################################################################################
+# Template for ECS cluster, ELB, Autoscaling and CloudWatch resources
+# Created by:
+# Environment:
+# Date: 06/19/2019
+# Resources:
+#   Security groups:
+#     - L4ALBSG01 (ALB specific L4 SG)
+#     - L4ECSSG01 (ECS host L4 SG)
+#   ELB:
+#     - ALB01 (Default ALB for ECS)
+#     - ALB01TG01 (Default target group)
+#     - ALB01Listener01 (Default 443 listener)
+#     - WebACLAssociation (Not in use, only required for public ALB)
+#   ECS:
+#     - EcsCluster
+#   Autoscaling:
+#     - EcsAutoScalingGroup
+#     - AutoScalingLaunchConfiguration
+#     - AsgScaleUpPolicy (For ECS host scaling)
+#     - AsgScaleDownPolicy (For ECS host scaling)
+#   CloudWatch:
+#     - CPUAlarmHigh (For ECS host scaling)
+#     - CPUAlarmLow (For ECS host scaling)
+#############################################################################################
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Cloud formation template for ECS Cluster & ALB"
+
+####################################### Parameters ##########################################
+#
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterLabels:
+      CreateALB01:
+        default: Do you want to create ALB and its resources (listener, target group, security group)?
+    ParameterGroups:
+      - Label:
+          default: "Bussiness specific parameters"
+        Parameters:
+          - AppCode
+          - AppCodeLower
+          - AppName
+          - Environment
+          - Region
+          - HADRTier
+          - VPCShortName
+          - SetTerminationProtection
+          - ITArea
+      - Label:
+          default: "ALB parameters"
+        Parameters:
+          - CreateALB01
+          - ALB01ServiceType
+          - ALB01ResourceTier
+          - ALB01Scheme
+          - ALB01AZ
+          - WebAclId
+          - SSLCertificateARN
+      - Label:
+          default: "ALB default Target groups health check parameters"
+        Parameters:
+          - HealthCheckPath
+          - HealthCheckProtocol
+          - HealthCheckPort
+          - HealthCheckTimeout
+          - HealthCheckInterval
+          - HealthyThresholdCount
+          - UnhealthyThresholdCount
+          - HealthCheckHttpCode
+      # -
+      #   Label:
+      #     default: "ALB deafult Target group parameters"
+      #   Parameters:
+      #     - ALB01TG01Port
+      #     - ALB01TG01Portocol
+      #     - ALB01TG01GroupType
+      - Label:
+          default: "ECS parameters"
+        Parameters:
+          - CreateECSCluster
+          - AmiId
+          - AutoScaleIndex
+          - MinClusterSize
+          - MaxClusterSize
+          - InstanceType
+          - CWLogGroupName
+          - ECSServiceType
+          - ECSResourceTier
+##
+##
+Parameters:
+  # ECS params
+  CreateECSCluster:
+    Description: Select false to delete or ignore ECS Cluster & auto scaling resources
+    Type: String
+    Default: true
+    AllowedValues:
+      - true
+      - false
+  EcsLaunchType:
+    Type: String
+    Description: "Select the ECS launch type"
+    AllowedValues:
+      - ec2
+      - fargate
+  CWLogGroupName:
+    Type: String
+    Description: Enter CloudWatch ECS Host log group name (not required for FARGATE launch type)
+  AutoScaleIndex:
+    Type: String
+    Description: Increment/decrement this value to deploy new autoscaling group for the same ECS cluster (not required for FARGATE launch type)
+    Default: 1
+  AmiId:
+    Type: String
+    Description: Enter Amazon Linux 2 ECS optimized AMI ID. Please update AutoScaleIndex while upgrading/downgrading AMI versions (not required for FARGATE launch type)
+  MinClusterSize:
+    Description: Specify minimum number of EC2 instances required for this ECS cluster (not required for FARGATE launch type)
+    Type: Number
+    Default: 2
+  MaxClusterSize:
+    Description: Specify maximum number of EC2 instances required for this ECS cluster (not required for FARGATE launch type)
+    Type: Number
+    Default: 3
+  InstanceType:
+    Type: String
+    Default: m5.large
+    Description: Choose the right instance type (not required for FARGATE launch type)
+    AllowedValues:
+      - t2.nano
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - t2.large
+      - t2.xlarge
+      - t2.2xlarge
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+      - m5.large
+      - c4.large
+      - c4.xlarge
+      - c4.2xlarge
+      - c4.4xlarge
+      - f1.2xlarge
+      - g3s.xlarge
+      - g3.4xlarge
+      - g2.2xlarge
+      - g2.8xlarge
+      - p2.xlarge
+      - p3.2xlarge
+      - r4.large
+      - r4.xlarge
+      - r4.2xlarge
+      - r4.4xlarge
+      - x1e.xlarge
+      - d2.xlarge
+      - d2.2xlarge
+      - d2.4xlarge
+      - i2.xlarge
+      - i2.2xlarge
+      - i2.4xlarge
+      - h1.2xlarge
+      - h1.4xlarge
+      - h1.8xlarge
+      - i3.large
+      - i3.xlarge
+      - i3.2xlarge
+      - i3.4xlarge
+  ECSServiceType:
+    Type: String
+    Default: EC2
+    AllowedValues:
+      - EC2
+      - RDS
+      - MDS
+    Description: "Select any value EC2, RDS, MDS (Managed Directory Service)"
+  ECSResourceTier:
+    Type: String
+    Default: App
+    AllowedValues:
+      - App
+      - Database
+      - Web
+      - Visibility
+      - White
+      - Prime
+      - DMZ
+    Description: "Please, select in which subnet the servers will reside"
+  #
+  # Security group information
+  VPCEndpointSG:
+    Type: String
+    Description: "Enter VPC endpoint security group id"
+    Default: sg-04d71f583940c2564
+
+  Route53ResolverSG:
+    Type: String
+    Description: "Enter Route53 security group id"
+    Default: sg-0ac10f2f69e32e260
+  #
+  # ALB params
+  CreateALB01:
+    Description: Select false to delete or ignore ALB and its resource creation
+    Type: String
+    Default: true
+    AllowedValues:
+      - true
+      - false
+  ALB01ServiceType:
+    Type: String
+    Default: ALB
+    AllowedValues:
+      - EC2
+      - RDS
+      - MDS
+      - ALB
+    Description: "Select any value EC2, RDS, MDS (Managed Directory Service)"
+  ALB01AZ:
+    Description: Enter minimum of 2 AZ's like A,B or B,C or A,C or A,B,C
+    Type: String
+    AllowedValues:
+      - A,B,
+      - A,C,
+      - A,B,
+      - B,C,
+      - A,B,C,
+  ALB01ResourceTier:
+    Type: String
+    AllowedValues:
+      - App
+      - Web
+      - Visibility
+      - White
+      - Prime
+      - DMZ
+      - Public
+    Description: "The subnet where ALB will reside"
+  WebAclId:
+    Description: Enter Web ACL ID to associate WAF or leave it blank to ignore association (mandatory for Public ALB)
+    Type: String
+    Default: ""
+  SSLCertificateARN:
+    Description: Please specify SSL ARN to enable 443 listener on ALB
+    Type: String
+    Default: "arn:aws:acm:us-east-1:485449107334:certificate/6a287dda-0d50-4769-a7f7-1db51d70ca55"
+  ALB01Scheme:
+    Type: String
+    Description: Specify whether ALB is internet facing (public) or intranet (internal)
+    Default: internal
+    AllowedValues:
+      - internet-facing
+      - internal
+  # ALB TG params
+  # ALB01TG01Port:
+  #   Type: String
+  #   Description: The port on which the targets receive traffic
+  #   Default: 443
+  # ALB01TG01Portocol:
+  #   Type: String
+  #   Description: The protocol to use for routing traffic to the targets
+  #   Default: HTTPS
+  #   AllowedValues:
+  #    - HTTP
+  #    - HTTPS
+  # ALB01TG01GroupType:
+  #   Type: String
+  #   Description: The type of target that you must specify when registering targets with this target group. You can't specify targets for a target group using more than one target type
+  #   Default: instance
+  #   AllowedValues:
+  #    - instance
+  #    - ip
+  #    - lambda
+  # ALB TG health check parameters
+  # HealthCheckPath:
+  #   Type: String
+  #   Description: The ping path that is the destination on the targets for health checks
+  #   Default: "/"
+  # HealthCheckProtocol:
+  #   Type: String
+  #   Description: The protocol the load balancer uses when performing health checks on targets
+  #   Default: HTTPS
+  #   AllowedValues:
+  #    - HTTP
+  #    - HTTPS
+  # HealthCheckPort:
+  #   Type: String
+  #   Description: The port the load balancer uses when performing health checks on targets
+  #   Default: 443
+  # HealthCheckTimeout:
+  #   Type: String
+  #   Description: The approximate number of seconds between health checks for an individual target and this value must be smaller than HealthCheckInterval
+  #   Default: 5
+  # HealthCheckInterval:
+  #   Type: String
+  #   Description: The approximate number of seconds between health checks for an individual target
+  #   Default: 30
+  # HealthyThresholdCount:
+  #   Type: String
+  #   Description: The number of consecutive successful health checks that are required before an unhealthy target is considered healthy
+  #   Default: 3
+  # UnhealthyThresholdCount:
+  #   Type: String
+  #   Description: The number of consecutive failed health checks that are required before a target is considered unhealthy.
+  #   Default: 5
+  # HealthCheckHttpCode:
+  #   Type: String
+  #   Description: The HTTP codes that a healthy target must use when responding to a health check, such as 200,202 or 200-399
+  #   Default: "200"
+  #
+  # Common parameters
+  Region:
+    Type: String
+    AllowedValues:
+      - us-east-1
+      - us-east-2
+    Description: "Select us-east-1 / us-east-2. Default is [us-east-1]"
+    Default: "us-east-1"
+  AppCode:
+    Type: String
+    MaxLength: "5"
+    AllowedPattern: ^[A-Z0-9]{1,5}$
+    Description: "The application code name cannot be of more that 5 characters"
+  AppCodeLower:
+    Type: String
+    MaxLength: "5"
+    AllowedPattern: ^[a-z0-9]{1,5}$
+    Description: "Enter application code all lower case"
+  AppName:
+    Type: String
+    Description: Enter the application name
+    AllowedPattern: '^[A-Za-z0-9_\-]+$'
+    ConstraintDescription: Specify your application name
+  Environment:
+    Type: String
+    #MinLength: 1
+    AllowedValues:
+      - Prod
+      - Test
+      - Dev
+      - QA
+      - DR
+      - Sandbox
+    Default: QA
+  HADRTier:
+    Type: String
+    Default: 5
+    Description: "Select HA/DR tier. Default is 5 i.e., no HA/DR"
+    AllowedValues:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+  VPCShortName:
+    Type: String
+    AllowedValues:
+      - Core
+      - CoreDR
+      - CoreTest
+      - EnterpriseDR
+      - EnterpriseDev
+      - EnterpriseProd
+      - EnterpriseQA
+      - EnterpriseSandbox
+      - FPLDR
+      - FPLDev
+      - FPLProd
+      - FPLQA
+      - FPLSandbox
+      - FPLTest
+      - GexaDev
+      - GexaDR
+      - GexaProd
+      - GexaQA
+      - GexaTest
+      - GulfPowerDev
+      - GulfPowerDR
+      - GulfPowerProd
+      - GulfPowerQA
+      - GulfPowerSandbox
+      - GulfPowerTest
+      - NEERDR
+      - NEERDev
+      - NEERProd
+      - NEERQA
+      - NEERSandbox
+      - NEERTest
+  SetTerminationProtection:
+    Type: String
+    Description: Select true to disable resource termination through aws console/cli/api
+    AllowedValues:
+      - true
+      - false
+    Default: false
+  ITArea:
+    Type: String
+    Description: "IT System Manager of the IT Area using the device"
+##
+####################################### Mappings ############################################
+Mappings:
+  RegionMap:
+    us-east-1:
+      Region: V
+      RegionLower: v
+    us-east-2:
+      Region: O
+      RegionLower: o
+  AZMap:
+    "zone":
+      a: "A"
+      b: "B"
+      c: "C"
+  ResourceTierMap:
+    App:
+      ResourceCode: App
+    Database:
+      ResourceCode: DB
+    Web:
+      ResourceCode: Web
+    DMZ:
+      ResourceCode: DMZ
+    Public:
+      ResourceCode: Public
+##
+####################################### Conditions ##########################################
+Conditions:
+  IsDev: !Equals [!Ref VPCShortName, "FPLDev"]
+  NotDev: !Not [Condition: IsDev]
+  CreateALB01: !Equals [!Ref CreateALB01, "true"]
+  CreateECS: !Equals [!Ref CreateECSCluster, "true"]
+  CreateHttpsListener: !And
+    - Condition: CreateALB01
+    - !Not [!Equals [!Ref SSLCertificateARN, ""]]
+  CreateWebAcl: !And
+    - !Not [!Equals [!Ref WebAclId, ""]]
+    - !Not [!Equals [!Ref ALB01Scheme, "internal"]]
+  CreateInOutRules: !Equals [!Ref CreateALB01, "true"]
+  DoesAz3exists: !Not [!Equals [!Select [2, !Split [",", !Ref ALB01AZ]], ""]]
+  CreateEndpointRule: !Not [!Equals [!Ref VPCEndpointSG, ""]]
+  CreateEcsEc2Resources: !And
+    - !Equals [!Ref EcsLaunchType, "ec2"]
+    - Condition: CreateECS
+##
+####################################### AWS Resources #######################################
+Resources:
+  ## Security group
+  # App SG
+  L4AppSG01:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join
+        - "-"
+        - - L4
+          - !Ref AppCode
+          - !FindInMap [ResourceTierMap, !Ref ECSResourceTier, ResourceCode]
+          - !Ref ECSServiceType
+          - !Ref VPCShortName
+          - !ImportValue Account-Global-AccountCode
+          - SG
+      GroupDescription: Layer 4 Security Group for App tier
+      VpcId:
+        Fn::ImportValue:
+          Fn::Join:
+            - "-"
+            - - "VPC"
+              - Ref: VPCShortName
+              - "VPCID"
+      SecurityGroupIngress:
+        - IpProtocol: TCP
+          FromPort: 1700
+          ToPort: 1799
+          CidrIp: 10.0.0.0/8
+          Description: No inbound rules needed
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: "3268"
+          ToPort: "3268"
+          CidrIp: 155.109.192.136/32
+          Description: (On-Prem) Globalcatalog
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+          Description: All Outbound Traffic
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+        - Key: Name
+          Value: !Join
+            - "-"
+            - - L4
+              - !Ref AppCode
+              - !FindInMap [ResourceTierMap, !Ref ECSResourceTier, ResourceCode]
+              - !Ref ECSServiceType
+              - !Ref VPCShortName
+              - !ImportValue Account-Global-AccountCode
+              - SG
+  # ALB SG
+  L4ALBSG01:
+    Type: AWS::EC2::SecurityGroup
+    Condition: CreateALB01
+    Properties:
+      GroupName: !Join
+        - "-"
+        - - L4
+          - !Ref AppCode
+          - !FindInMap [ResourceTierMap, !Ref ALB01ResourceTier, ResourceCode]
+          - !Ref ALB01ServiceType
+          - !Ref VPCShortName
+          - !ImportValue Account-Global-AccountCode
+          - SG
+      GroupDescription: Layer 4 Security Group for ALB
+      VpcId:
+        Fn::ImportValue:
+          Fn::Join:
+            - "-"
+            - - "VPC"
+              - Ref: VPCShortName
+              - "VPCID"
+      SecurityGroupIngress:
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/8
+          Description: No inbound rules needed
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 172.29.0.0/16
+          Description: Added rule to access VPN proxy
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 172.30.0.0/15
+          Description: Added rule to access VPN proxy
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 172.32.0.0/16
+          Description: Added rule to access VPN proxy
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+        - Key: Name
+          Value: !Join
+            - "-"
+            - - L4
+              - !Ref AppCode
+              - !FindInMap [
+                  ResourceTierMap,
+                  !Ref ALB01ResourceTier,
+                  ResourceCode,
+                ]
+              - !Ref ALB01ServiceType
+              - !Ref VPCShortName
+              - !ImportValue Account-Global-AccountCode
+              - SG
+  ## Security group ingress/egress rules
+
+  # ## ALB Ingress rule - Self
+  # L4ALBSG01ingress01:
+  #   Type: AWS::EC2::SecurityGroupIngress
+  #   Condition: CreateInOutRules
+  #   Properties:
+  #     Description: Allow In traffic to L4 App security group
+  #     SourceSecurityGroupId:  !Ref L4ALBSG01
+  #     FromPort: 8080
+  #     GroupId: !Ref L4ALBSG01
+  #     IpProtocol: tcp
+  #     ToPort: 8080
+
+  ## ALB egress rule
+  L4ALBSG01egress01:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: CreateInOutRules
+    Properties:
+      Description: Allow Out traffic to L4 App security group
+      DestinationSecurityGroupId: !Ref L4AppSG01
+      FromPort: 0
+      GroupId: !Ref L4ALBSG01
+      IpProtocol: tcp
+      ToPort: 65535
+
+  ## APP ingress rule
+  L4AppSG01ingress01:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: CreateInOutRules
+    Properties:
+      Description: Allow In traffic from L4 ALB security group
+      SourceSecurityGroupId: !Ref L4ALBSG01
+      FromPort: 0
+      GroupId: !Ref L4AppSG01
+      IpProtocol: tcp
+      ToPort: 65535
+
+  L4AppSG01egress01:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: CreateInOutRules
+    Properties:
+      Description: Allow OUT traffic from App security group to VPC endpoints
+      CidrIp: "10.0.0.0/8"
+      FromPort: 443
+      GroupId: !Ref L4AppSG01
+      IpProtocol: tcp
+      ToPort: 443
+  ##
+  ###########################################################
+  # ALB 01 resources
+  ###########################################################
+  ## ALB
+  ALB01:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Condition: CreateALB01
+    Properties:
+      Scheme: !Ref ALB01Scheme
+      Subnets:
+        - !ImportValue
+          "Fn::Join":
+            - "-"
+            - - VPC
+              - !Ref VPCShortName
+              - !Select [0, !Split [",", !Ref ALB01AZ]]
+              - !Ref ALB01ResourceTier
+              - SUBNET
+        - !ImportValue
+          "Fn::Join":
+            - "-"
+            - - VPC
+              - !Ref VPCShortName
+              - !Select [1, !Split [",", !Ref ALB01AZ]]
+              - !Ref ALB01ResourceTier
+              - SUBNET
+        - Fn::If:
+            - DoesAz3exists
+            - !ImportValue
+              "Fn::Join":
+                - "-"
+                - - VPC
+                  - !Ref VPCShortName
+                  - !Select [2, !Split [",", !Ref ALB01AZ]]
+                  - !Ref ALB01ResourceTier
+                  - SUBNET
+            - !Ref "AWS::NoValue"
+      LoadBalancerAttributes:
+        - Key: deletion_protection.enabled
+          Value: !Ref SetTerminationProtection
+      SecurityGroups:
+        - !Ref L4ALBSG01
+      Tags:
+        - Key: Name
+          Value: !Join
+            - "-"
+            - - Fn::Join:
+                  - ""
+                  - - "2"
+                    - !ImportValue Account-Global-AccountCode
+                    - Fn::ImportValue: !Sub "Account-Global-RegionCode-${AWS::Region}"
+              - !Sub "${AppCode}"
+              - "ALB01"
+        - Key: AppCode
+          Value: !Sub ${AppCode}
+  ##
+  ## Default HTTPS (443) Listener
+  ALB01Listener01:
+    Condition: CreateHttpsListener
+    DependsOn:
+      #      - ALB01TG01
+      - ALB01
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Certificates:
+        - CertificateArn: !Ref SSLCertificateARN
+      LoadBalancerArn: !Ref ALB01
+      Port: 443
+      Protocol: HTTPS
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            ContentType: "text/html"
+            MessageBody: "<html><head>VegetationManagement</head><body><p><a href='https://vms.fpl.com/'>Click here for Vegetation Management</a></p></body></html>"
+            StatusCode: 200
+        # - Type: forward
+        #   TargetGroupArn: !Ref ALB01TG01
+  ##
+  ## Default target group
+  # ALB01TG01:
+  #   Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  #   Condition: CreateALB01
+  #   Properties:
+  #       Port: !Ref ALB01TG01Port
+  #       Protocol: !Ref ALB01TG01Portocol
+  #       TargetType: !Ref ALB01TG01GroupType
+  #       VpcId:
+  #         Fn::ImportValue:
+  #           Fn::Join:
+  #           - "-"
+  #           - - "VPC"
+  #             - Ref: VPCShortName
+  #             - "VPCID"
+  #       HealthCheckPath: !Ref HealthCheckPath
+  #       HealthCheckProtocol: !Ref HealthCheckProtocol
+  #       HealthCheckPort: !Ref HealthCheckPort
+  #       HealthCheckTimeoutSeconds: !Ref HealthCheckTimeout
+  #       HealthCheckIntervalSeconds: !Ref HealthCheckInterval
+  #       HealthyThresholdCount: !Ref HealthyThresholdCount
+  #       UnhealthyThresholdCount: !Ref UnhealthyThresholdCount
+  #       Matcher:
+  #         HttpCode: !Ref HealthCheckHttpCode
+  #       Name: !Join
+  #         - '-'
+  #         - - Fn::Join:
+  #             - ''
+  #             - - "2"
+  #               - !ImportValue  Account-Global-AccountCode
+  #               - Fn::ImportValue:
+  #                   !Sub 'Account-Global-RegionCode-${AWS::Region}'
+  #           - !Sub '${AppCode}'
+  #           - 'Default-TG'
+  #       Tags:
+  #         - Key: Name
+  #           Value: !Join
+  #             - '-'
+  #             - - Fn::Join:
+  #                 - ''
+  #                 - - "2"
+  #                   - !ImportValue  Account-Global-AccountCode
+  #                   - Fn::ImportValue:
+  #                       !Sub 'Account-Global-RegionCode-${AWS::Region}'
+  #               - !Sub '${AppCode}'
+  #               - 'Default-TG'
+
+  ##
+  ## Web ACL
+  ## this is not used for internal ALB
+  WebACLAssociation:
+    Type: "AWS::WAFRegional::WebACLAssociation"
+    Condition: CreateWebAcl
+    DependsOn:
+      - ALB01
+    Properties:
+      ResourceArn:
+        Ref: ALB01
+      WebACLId:
+        Ref: WebAclId
+  ##
+  ###########################################################
+  # ECS resources
+  ###########################################################
+  # ECS Cluster
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Condition: CreateECS
+    Properties:
+      ClusterName: !Join
+        - "-"
+        - - Fn::Join:
+              - ""
+              - - "2"
+                - !ImportValue Account-Global-AccountCode
+                - Fn::ImportValue: !Sub "Account-Global-RegionCode-${AWS::Region}"
+          - !Sub "${AppCode}"
+          - !Sub "${AppName}"
+          - "ECS"
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+
+  #
+  AutoScalingLaunchConfiguration:
+    Type: "AWS::AutoScaling::LaunchConfiguration"
+    Condition: CreateEcsEc2Resources
+    Properties:
+      ImageId: !Ref AmiId
+      LaunchConfigurationName: !Join
+        - "-"
+        - - "Fn::Join":
+              - ""
+              - - "2"
+                - !ImportValue Account-Global-AccountCode
+                - "Fn::ImportValue": !Sub "Account-Global-RegionCode-${AWS::Region}"
+          - !Sub "${AppCode}"
+          - !Sub "${AppName}"
+          - !Sub "ECS-LaunchConfig${AutoScaleIndex}"
+      InstanceType: !Ref InstanceType
+      SecurityGroups:
+        - "Fn::ImportValue": !Join
+            - "-"
+            - - SG
+              - !Ref VPCShortName
+              - L1SG
+        - "Fn::ImportValue": !Join
+            - "-"
+            - - SG
+              - !Ref VPCShortName
+              - L2RHSG
+        - "Fn::ImportValue": !Join
+            - "-"
+            - - SG
+              - !Ref VPCShortName
+              - L3SGWEB
+        - !Ref L4AppSG01
+      IamInstanceProfile:
+        "Fn::ImportValue": !Sub ${AppCode}-ECS-InstanceProfile-Name
+      UserData:
+        "Fn::Base64": !Sub >
+          #!/bin/bash
+
+          echo "[INFO] User data execution started..."
+
+          echo "[INFO] Setting session proxy..."
+
+          export https_proxy=webproxy.fpl.com:8080
+
+          export http_proxy=webproxy.fpl.com:8080
+
+          export no_proxy=169.254.169.254,10.*
+
+          sudo yum update -y
+
+          echo "[INFO] Install aws helper scripts & cloud-watch logs agent..."
+
+          sudo yum install -y aws-cfn-bootstrap
+
+          sudo yum install -y awslogs
+
+          echo "[INFO] Execute cfn-init '/opt/aws/bin/cfn-init -v --region ${AWS::Region} --stack ${AWS::StackName} --resource AutoScalingLaunchConfiguration'..."
+
+          /opt/aws/bin/cfn-init -v --region ${AWS::Region} --stack ${AWS::StackName} --resource AutoScalingLaunchConfiguration
+
+          echo "[INFO] Signal cfn stack '/opt/aws/bin/cfn-signal -e $? --region ${AWS::Region} --stack ${AWS::StackName} --resource EcsAutoScalingGroup'..."
+
+          /opt/aws/bin/cfn-signal -e $? --region ${AWS::Region} --stack ${AWS::StackName} --resource EcsAutoScalingGroup
+
+          echo "[INFO] User data execution completed..."
+    Metadata:
+      "AWS::CloudFormation::Init":
+        config:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              mode: "000400"
+              owner: root
+              group: root
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Sub >
+                [cfn-auto-reloader-hook]
+
+                triggers=post.update
+
+                path=Resources.AutoScalingLaunchConfiguration.Metadata.AWS::CloudFormation::Init
+
+                action=/opt/aws/bin/cfn-init -v --region ${AWS::Region} --stack ${AWS::StackName} --resource AutoScalingLaunchConfiguration
+            /etc/awslogs/awscli.conf:
+              content: !Sub |
+                [plugins]
+                cwlogs = cwlogs
+                [default]
+                region = ${AWS::Region}
+            /etc/awslogs/awslogs.conf:
+              content:
+                Fn::Sub:
+                  - |
+                    [general]
+                    state_file = /var/lib/awslogs/agent-state
+
+                    [/var/log/messages]
+                    file = /var/log/messages
+                    log_group_name = ${LogGroup}
+                    log_stream_name = ${ClusterName}/{instance_id}/var/log/messages
+                    datetime_format = %b %d %H:%M:%S
+
+                    [/var/log/cloud-init-output.log]
+                    file = /var/log/cloud-init-output.log
+                    log_group_name = ${LogGroup}
+                    log_stream_name = ${ClusterName}/{instance_id}/var/log/cloud-init-output.log
+                    datetime_format = %b %d %H:%M:%S
+
+                    [/var/log/cfn-init.log]
+                    file = /var/log/cfn-init.log
+                    log_group_name = ${LogGroup}
+                    log_stream_name = ${ClusterName}/{instance_id}/var/log/cfn-init.log
+                    datetime_format = %Y-%m-%d %H:%M:%S,%f
+
+                    [/var/log/ecs/ecs-init.log]
+                    file = /var/log/ecs/ecs-init.log*
+                    log_group_name = ${LogGroup}
+                    log_stream_name = ${ClusterName}/{instance_id}/var/log/ecs/ecs-init.log
+                    datetime_format = %Y-%m-%d %H:%M:%S%z
+
+                    [/var/log/ecs/ecs-agent.log]
+                    file = /var/log/ecs/ecs-agent.log*
+                    log_group_name = ${LogGroup}
+                    log_stream_name = ${ClusterName}/{instance_id}/var/log/ecs/ecs-agent.log
+                    datetime_format = %Y-%m-%d %H:%M:%S%z
+                  - ClusterName: !Ref EcsCluster
+                    LogGroup: !Ref CWLogGroupName
+          commands:
+            01-setup-proxy:
+              command: !Sub
+                - |
+                  #cloud-boothook
+                  # Configure Yum, the Docker daemon, and the ECS agent to use an HTTP proxy
+
+                  # Specify proxy host, port number, and ECS cluster name to use
+                  PROXY_HOST=webproxy.fpl.com
+                  PROXY_PORT=8080
+                  CLUSTER_NAME=${CLUSTER_NAME}
+
+                  if grep -q 'Amazon Linux release 2' /etc/system-release ; then
+                      OS=AL2
+                      echo "Setting OS to Amazon Linux 2"
+                  elif grep -q 'Amazon Linux AMI' /etc/system-release ; then
+                      OS=ALAMI
+                      echo "Setting OS to Amazon Linux AMI"
+                  else
+                      echo "This user data script only supports Amazon Linux 2 and Amazon Linux AMI."
+                  fi
+
+                  # Set Yum HTTP proxy
+                  if [ ! -f /var/lib/cloud/instance/sem/config_yum_http_proxy ]; then
+                      echo "proxy=http://$PROXY_HOST:$PROXY_PORT" >> /etc/yum.conf
+                      echo "$$: $(date +%s.%N | cut -b1-13)" > /var/lib/cloud/instance/sem/config_yum_http_proxy
+                  fi
+
+                  # Set Docker HTTP proxy (different methods for Amazon Linux 2 and Amazon Linux AMI)
+                  # Amazon Linux 2
+                  if [ $OS == "AL2" ] && [ ! -f /var/lib/cloud/instance/sem/config_docker_http_proxy ]; then
+                      mkdir /etc/systemd/system/docker.service.d
+                      cat <<EOF > /etc/systemd/system/docker.service.d/http-proxy.conf
+                  [Service]
+                  Environment="HTTP_PROXY=http://$PROXY_HOST:$PROXY_PORT/"
+                  Environment="HTTPS_PROXY=http://$PROXY_HOST:$PROXY_PORT/"
+                  Environment="NO_PROXY=169.254.169.254,169.254.170.2,10.*"
+                  EOF
+                      systemctl daemon-reload
+                      if [ "$(systemctl is-active docker)" == "active" ] 
+                      then 
+                          systemctl restart docker
+                      fi 
+                      echo "$$: $(date +%s.%N | cut -b1-13)" > /var/lib/cloud/instance/sem/config_docker_http_proxy
+                  fi
+                  # Amazon Linux AMI
+                  if [ $OS == "ALAMI" ] && [ ! -f /var/lib/cloud/instance/sem/config_docker_http_proxy ]; then
+                      echo "export HTTP_PROXY=http://$PROXY_HOST:$PROXY_PORT/" >> /etc/sysconfig/docker
+                      echo "export HTTPS_PROXY=http://$PROXY_HOST:$PROXY_PORT/" >> /etc/sysconfig/docker
+                      echo "export NO_PROXY=169.254.169.254,169.254.170.2,10.*" >> /etc/sysconfig/docker
+                      echo "$$: $(date +%s.%N | cut -b1-13)" > /var/lib/cloud/instance/sem/config_docker_http_proxy
+                  fi
+
+                  # Set ECS agent HTTP proxy
+                  if [ ! -f /var/lib/cloud/instance/sem/config_ecs-agent_http_proxy ]; then
+                      cat <<EOF > /etc/ecs/ecs.config
+                  ECS_CLUSTER=$CLUSTER_NAME
+                  ECS_ENABLE_CONTAINER_METADATA=true
+                  HTTP_PROXY=$PROXY_HOST:$PROXY_PORT
+                  NO_PROXY=169.254.169.254,169.254.170.2,10.*,/var/run/docker.sock
+                  EOF
+                      echo "$$: $(date +%s.%N | cut -b1-13)" > /var/lib/cloud/instance/sem/config_ecs-agent_http_proxy
+                  fi
+
+                  # Set ecs-init HTTP proxy (different methods for Amazon Linux 2 and Amazon Linux AMI)
+                  # Amazon Linux 2
+                  if [ $OS == "AL2" ] && [ ! -f /var/lib/cloud/instance/sem/config_ecs-init_http_proxy ]; then
+                      mkdir /etc/systemd/system/ecs.service.d
+                      cat <<EOF > /etc/systemd/system/ecs.service.d/http-proxy.conf
+                  [Service]
+                  Environment="HTTP_PROXY=$PROXY_HOST:$PROXY_PORT/"
+                  Environment="NO_PROXY=169.254.169.254,169.254.170.2,10.*,/var/run/docker.sock"
+                  EOF
+                      systemctl daemon-reload
+                      if [ "$(systemctl is-active ecs)" == "active" ]; then 
+                          systemctl restart ecs
+                      fi 
+                      echo "$$: $(date +%s.%N | cut -b1-13)" > /var/lib/cloud/instance/sem/config_ecs-init_http_proxy
+                  fi
+                  # Amazon Linux AMI
+                  if [ $OS == "ALAMI" ] && [ ! -f /var/lib/cloud/instance/sem/config_ecs-init_http_proxy ]; then
+                      cat <<EOF > /etc/init/ecs.override
+                  env HTTP_PROXY=$PROXY_HOST:$PROXY_PORT
+                  env NO_PROXY=169.254.169.254,169.254.170.2,10.*,/var/run/docker.sock
+                  EOF
+                      echo "$$: $(date +%s.%N | cut -b1-13)" > /var/lib/cloud/instance/sem/config_ecs-init_http_proxy
+                  fi
+                - CLUSTER_NAME: !Ref EcsCluster
+            02-start-awslogs:
+              command: !Sub |
+
+                echo "[INFO] Starting awslogs service..."
+
+                sudo systemctl start awslogsd
+
+                echo "[INFO] Restarting cfn-hup service..."
+
+                sudo systemctl restart cfn-hup
+  #
+  EcsAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Condition: CreateEcsEc2Resources
+    DependsOn: AutoScalingLaunchConfiguration
+    Properties:
+      VPCZoneIdentifier:
+        - Fn::ImportValue:
+            !Join ["-", ["VPC", !Ref VPCShortName, "A", "App", "SUBNET"]]
+        - Fn::ImportValue:
+            !Join ["-", ["VPC", !Ref VPCShortName, "B", "App", "SUBNET"]]
+        - Fn::ImportValue:
+            !Join ["-", ["VPC", !Ref VPCShortName, "C", "App", "SUBNET"]]
+      LaunchConfigurationName: !Ref AutoScalingLaunchConfiguration
+      AutoScalingGroupName: !Join
+        - "-"
+        - - "Fn::Join":
+              - ""
+              - - "2"
+                - !ImportValue Account-Global-AccountCode
+                - "Fn::ImportValue": !Sub "Account-Global-RegionCode-${AWS::Region}"
+          - !Sub "${AppCode}"
+          - !Sub "${AppName}"
+          - !Sub "ECS-ASG${AutoScaleIndex}"
+      MinSize: !Ref MinClusterSize
+      MaxSize: !Ref MaxClusterSize
+      DesiredCapacity: !Ref MinClusterSize
+      HealthCheckGracePeriod: 300
+      TerminationPolicies:
+        - OldestLaunchConfiguration
+        - OldestInstance
+      MetricsCollection:
+        [
+          {
+            "Granularity": "1Minute",
+            "Metrics":
+              [
+                "GroupDesiredCapacity",
+                "GroupInServiceInstances",
+                "GroupPendingInstances",
+                "GroupTotalInstances",
+                "GroupTerminatingInstances",
+              ],
+          },
+        ]
+      Tags:
+        - Key: Name
+          Value: !Sub "${EcsCluster}"
+          PropagateAtLaunch: true
+        - Key: AppCode
+          Value: !Sub ${AppCode}
+          PropagateAtLaunch: true
+        - Key: AppName
+          Value: !Sub ${AppName}
+          PropagateAtLaunch: true
+        - Key: ApplicationTier
+          Value: App
+          PropagateAtLaunch: true
+        - Key: OS
+          Value: LINUX
+          PropagateAtLaunch: true
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT25M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: !Ref MinClusterSize
+        MaxBatchSize: 1
+        PauseTime: PT25M
+        SuspendProcesses:
+          - HealthCheck
+          - ReplaceUnhealthy
+          - AZRebalance
+          - AlarmNotification
+          - ScheduledActions
+        WaitOnResourceSignals: true
+  ##
+  ###########################################################
+  # ASG Policies & CloudWatch Alarms
+  ###########################################################
+  AsgScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Condition: CreateEcsEc2Resources
+    DependsOn:
+      - EcsAutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Ref EcsAutoScalingGroup
+      AdjustmentType: ChangeInCapacity
+      Cooldown: 300
+      ScalingAdjustment: 1
+  #
+  AsgScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Condition: CreateEcsEc2Resources
+    DependsOn:
+      - EcsAutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Ref EcsAutoScalingGroup
+      AdjustmentType: ChangeInCapacity
+      Cooldown: 300
+      ScalingAdjustment: -1
+  #
+  CPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreateEcsEc2Resources
+    DependsOn:
+      - EcsAutoScalingGroup
+    Properties:
+      AlarmDescription: Scale Up if CPU is greater than 80% for 10 minutes
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      AlarmActions:
+        - Ref: AsgScaleUpPolicy
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref EcsCluster
+  #
+  CPUAlarmLow:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreateEcsEc2Resources
+    DependsOn:
+      - EcsAutoScalingGroup
+    Properties:
+      AlarmDescription: Scale down if CPU is Lower than 60% for 10 minutes
+      ComparisonOperator: LessThanOrEqualToThreshold
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 60
+      AlarmActions:
+        - Ref: AsgScaleDownPolicy
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref EcsCluster
+##
+####################################### Outputs #############################################
+Outputs:
+  ##
+  AppSG:
+    Description: App L4 Security group
+    Value: !GetAtt L4AppSG01.GroupId
+    Export:
+      Name: !Sub "${AppCode}-ECS-SG"
+  ALBSG:
+    Condition: CreateALB01
+    Description: Public ALB L4 Security group
+    Value: !GetAtt L4ALBSG01.GroupId
+    Export:
+      Name: !Sub "${AppCode}-ALB-SG"
+  ##
+  ALB01DNS:
+    Condition: CreateALB01
+    Description: "ALB DNS name"
+    Value: !GetAtt ALB01.DNSName
+    Export:
+      Name: !Sub "${AppCode}-ECS-ALB-DNS"
+  ALB01ARN:
+    Condition: CreateALB01
+    Description: "ALB resource ARN"
+    Value: !Ref ALB01
+    Export:
+      Name: !Sub "${AppCode}-ECS-ALB"
+  ##
+  # DefaultTG:
+  #   Condition: CreateALB01
+  #   Description: "Default target group for ALB01"
+  #   Value: !Ref ALB01TG01
+  #   Export:
+  #     Name: !Sub "${AppCode}-ECS-ALB-Default-TG"
+  DefaultListener:
+    Condition: CreateHttpsListener
+    Description: "Default HTTPS listener for ALB01"
+    Value: !Ref ALB01Listener01
+    Export:
+      Name: !Sub "${AppCode}-ALB-DefaultListener-ARN"
+  ##
+  EcsCluster:
+    Description: "ECS Cluster"
+    Condition: CreateECS
+    Value: !Ref EcsCluster
+    Export:
+      Name: !Sub "${AppCode}-ECS-Cluster"

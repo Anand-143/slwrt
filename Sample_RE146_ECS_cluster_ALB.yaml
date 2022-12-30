@@ -1,0 +1,690 @@
+
+#############################################################################################
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Template for RSV 3 ECS Cluster"
+
+################################## Parameters ################################################
+Parameters:
+  AppCode:
+    Type: String
+    MaxLength: 5
+    Description: The application code name cannot be more than 5 characters
+    ConstraintDescription: Appcode field does not match the required constraints
+    Default: RE146
+  
+  AppName:
+    Type: String
+    Description: Application name
+    AllowedPattern: "^[A-Z0-9_\\-]+$"
+    ConstraintDescription: Specify your application name
+    Default: RSV
+
+  ALBScheme:
+    Type: String
+    Description: Specify whether ALB is internet facing or intranet
+    Default: internal
+    AllowedValues:
+      - internet-facing
+      - internal
+
+  ALBResourceTier:
+    Description: Specify subnets for ALB
+    Type: String
+    AllowedValues:
+      - App
+      - DMZ
+      - Public
+      - Web
+    Default: Web
+
+Mappings:
+  AccountIDMap:
+    "707512021127":
+      VPCShortName: Core
+    "359300531472":
+      VPCShortName: CoreTest
+    "889535458826":
+      VPCShortName: CoreDR
+    "434940588922":
+      VPCShortName: EnterpriseProd
+    "129801215131":
+      VPCShortName: EnterpriseQA
+    "288355943657":
+      VPCShortName: EnterpriseDev
+    "524246855650":
+      VPCShortName: EnterpriseSandbox
+    "120380718976":
+      VPCShortName: NEERProd
+    "926173705195":
+      VPCShortName: NEERQA
+    "733125211443":
+      VPCShortName: NEERDev
+    "484902404805":
+      VPCShortName: NEERSandbox
+    "678078281154":
+      VPCShortName: NEERTest
+    "430004966399":
+      VPCShortName: FPLProd
+    "485449107334":
+      VPCShortName: FPLQA
+    "977465404123":
+      VPCShortName: FPLDev
+    "237980099910":
+      VPCShortName: FPLSandbox
+    "688642023437":
+      VPCShortName: SecurityProd
+    "343234139589":
+      VPCShortName: SecurityTest
+    "480804328775":
+      VPCShortName: Isolation
+    "914606261750":
+      VPCShortName: NEERDR
+    "202055847252":
+      VPCShortName: FPLDR
+    "516627182506":
+      VPCShortName: FPLTest
+    "719322411134":
+      VPCShortName: GulfPowerDev
+    "546978450329":
+      VPCShortName: GulfPowerTest
+    "649713442868":
+      VPCShortName: GulfPowerQA
+    "374887338695":
+      VPCShortName: GulfPowerProd
+    "725860224702":
+      VPCShortName: NuclearDev
+    "891266349116":
+      VPCShortName: NuclearQA
+    "954900411380":
+      VPCShortName: NuclearProd
+
+Conditions:
+  isFPLDev:
+    !Equals [!Ref "AWS::AccountId", 977465404123] 
+  isFPLQaProd: !Or [!Equals [!Ref "AWS::AccountId", 485449107334 ], !Equals [!Ref "AWS::AccountId", 430004966399]]  
+
+
+Resources:
+
+######################################### ECS Cluster ########################################
+
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Join
+            - '-'
+            - - Fn::Join:
+                - ''
+                - - "2"
+                  - !ImportValue  Account-Global-AccountCode
+                  - Fn::ImportValue:
+                      !Sub 'Account-Global-RegionCode-${AWS::Region}'
+              - !Sub '${AppCode}'
+              - !Sub '${AppName}'
+              - 'ECS'
+      ClusterSettings:  
+        - Name: containerInsights
+          Value: enabled
+
+ 
+################################################L4 Security groups for ALB & ECS ########################
+
+  L4ALBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join
+        - '-'
+        - - L4
+          - !Ref AppCode
+          - App
+          - "ALB"
+          - !FindInMap [AccountIDMap, !Ref "AWS::AccountId", VPCShortName]
+          - !ImportValue Account-Global-AccountCode
+          - SG
+      GroupDescription: Layer 4 Security Group for ALB
+      VpcId:
+        Fn::ImportValue:
+          Fn::Join:
+          - "-"
+          - - "VPC"
+            - !FindInMap [AccountIDMap, !Ref "AWS::AccountId", VPCShortName]
+            - "VPCID"
+      SecurityGroupIngress:
+        - IpProtocol: TCP
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 10.0.0.0/8
+          Description: (On-Prem) Allow HTTP
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/8
+          Description: (On-Prem) Allow HTTPS
+
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 155.109.0.0/16
+          Description: Allow connection from Proxy
+
+        - IpProtocol: TCP
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 155.109.0.0/16
+          Description: Allow connection from Proxy
+        
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 172.27.0.0/19
+          Description: Allow connection from VPN-1
+
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 172.27.32.0/20
+          Description: Allow connection from VPN-2
+        
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 172.29.0.0/16
+          Description: Allow connection from VPN-3
+        
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 172.30.0.0/16
+          Description: Allow connection from VPN-4
+        
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 172.31.0.0/16
+          Description: Allow connection from VPN-5
+        
+      SecurityGroupEgress:
+        - IpProtocol: TCP
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 10.0.0.0/8
+          Description: Allow HTTP to ECS SG
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/8
+          Description: Allow HTTPS to ECS SG
+        - FromPort: 443
+          IpProtocol: TCP
+          ToPort: 443
+          CidrIp: 155.109.0.0/16
+          Description: Traffic to proxy range on port 443
+        - FromPort: 80
+          IpProtocol: TCP
+          ToPort: 80
+          CidrIp: 155.109.0.0/16
+          Description: Traffic to proxy range on port 443
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - L4
+              - !Ref AppCode
+              - Web
+              - "ALB"
+              - !FindInMap [AccountIDMap, !Ref "AWS::AccountId", VPCShortName]
+              - !ImportValue Account-Global-AccountCode
+              - SG
+ 
+  L4ALBIngressECS:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: L4ALBSG
+      IpProtocol: -1
+      SourceSecurityGroupId : !Ref L4ECSSG
+      Description: All traffic from a container in the host
+  
+  L4ALBegressECS:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId:
+        Ref: L4ALBSG
+      IpProtocol: -1
+      SourceSecurityGroupId : !Ref L4ECSSG
+      Description: All traffic to containers in the host
+
+  L4ECSSG:
+    DependsOn: L4ALBSG
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join
+        - '-'
+        - - L4
+          - !Ref AppCode
+          - App
+          - ECS
+          - !FindInMap [AccountIDMap, !Ref "AWS::AccountId", VPCShortName]
+          - !ImportValue Account-Global-AccountCode
+          - SG
+      GroupDescription: Layer 4 Security Group for ECS Cluster
+      VpcId:
+        Fn::ImportValue:
+          Fn::Join:
+          - "-"
+          - - "VPC"
+            - !FindInMap [AccountIDMap, !Ref "AWS::AccountId", VPCShortName]
+            - "VPCID"
+      SecurityGroupIngress:
+        - IpProtocol: TCP
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 10.0.0.0/8
+          Description: (On-Prem) HTTP Web port
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/8
+          Description: (On-Prem) HTTPS Web port
+        - IpProtocol: TCP
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId : !Ref L4ALBSG
+          Description: (AWS) Allow HTTP from ALB SG
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 127.0.0.1/32    
+          Description: (Self) Loopback
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - L4
+              - !Ref AppCode
+              - App
+              - "ECS"
+              - !FindInMap [AccountIDMap, !Ref "AWS::AccountId", VPCShortName]
+              - !ImportValue Account-Global-AccountCode
+              - SG
+  
+  L4ECSEgressALB:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId:
+        Ref: L4ECSSG
+      IpProtocol: -1
+      SourceSecurityGroupId : !Ref L4ALBSG
+      Description: All traffic from ALB
+
+  L4ECSEgressRedis:
+    Condition: isFPLQaProd
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId:
+        Ref: L4ECSSG
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      SourceSecurityGroupId : !ImportValue 'NEE-RE146-L4RedisSG'
+      Description: Outbound to redis cluster
+
+  L4ECSEgressRedisDev:
+    Condition: isFPLDev
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId:
+        Ref: L4ECSSG
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      SourceSecurityGroupId : sg-08e14bbf8ba26f020
+      Description: Outbound to redis cluster
+  
+  
+  L4ECSIngressALB:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: L4ECSSG
+      IpProtocol: -1
+      SourceSecurityGroupId : !Ref L4ALBSG
+      Description: All traffic from ALB
+
+  L4EgressALL:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId:
+        Ref: L4ECSSG
+      IpProtocol: -1
+      CidrIp: 10.0.0.0/8
+      Description: Internal  traffic
+  
+  L4ECSEgressPreFixList:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId:
+        Ref: L4ECSSG
+      IpProtocol: -1
+      DestinationPrefixListId: pl-63a5400a
+      Description: All traffic to s3 prefix list
+  
+  L4ECSEgressLayer4SG01:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 53
+      IpProtocol: tcp
+      ToPort: 53
+      CidrIp: 10.0.0.0/8
+      Description: "DNS Traffic tcp"
+  
+  L4ECSEgressLayer4SG02:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 53
+      IpProtocol: udp
+      ToPort: 53
+      CidrIp: 10.0.0.0/8
+      Description: "DNS Traffic udp"
+  
+  egressLayer4SG04:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 443
+      IpProtocol: tcp
+      ToPort: 443
+      CidrIp: 155.109.0.0/16
+      Description: Traffic to proxy range on port 443  
+
+  egressLayer4SG15:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 80
+      IpProtocol: tcp
+      ToPort: 80
+      CidrIp: 155.109.0.0/16
+      Description: Traffic to proxy range on port 443  
+
+  egressLayer4SG05:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 1730
+      IpProtocol: tcp
+      ToPort: 1730
+      CidrIp: 10.110.22.222/32
+      Description: Traffic to on-prem Oracle
+
+  egressLayer4SG06:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 1433
+      IpProtocol: tcp
+      ToPort: 1433
+      CidrIp: 10.110.35.246/32
+      Description: Traffic to on-prem SQL   
+
+  egressLayer4SG07:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 10040
+      IpProtocol: tcp
+      ToPort: 10040
+      CidrIp: 10.110.20.108/32
+      Description: Traffic to on-prem Mongo DB Dev 
+
+  egressLayer4SG08:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 8080
+      IpProtocol: tcp
+      ToPort: 8080
+      CidrIp: 10.110.30.201/32
+      Description: Traffic to on-prem Next Grid 
+
+  egressLayer4SG09:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 80
+      IpProtocol: tcp
+      ToPort: 80
+      CidrIp: 155.109.192.174/32
+      Description: Traffic to on-prem AMI (InApp)
+
+  egressLayer4SG10:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 8080
+      IpProtocol: tcp
+      ToPort: 8080
+      CidrIp: 10.193.99.187/32
+      Description: Traffic to gulf meter ping service 
+
+  egressLayer4SG11:
+    Condition: isFPLQaProd
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 10040
+      IpProtocol: tcp
+      ToPort: 10040
+      CidrIp: 10.110.38.149/32
+      Description: Traffic to on-prem Mongo DB Prod
+
+  egressLayer4SG12:
+    Condition: isFPLQaProd
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 10040
+      IpProtocol: tcp
+      ToPort: 10040
+      CidrIp: 10.110.38.148/32
+      Description: Traffic to on-prem Mongo DB Prod
+
+  egressLayer4SG13:
+    Condition: isFPLQaProd
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 10040
+      IpProtocol: tcp
+      ToPort: 10040
+      CidrIp: 10.110.38.147/32
+      Description: Traffic to on-prem Mongo DB Prod
+
+  egressLayer4SG14:
+    Condition: isFPLQaProd
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 10040
+      IpProtocol: tcp
+      ToPort: 10040
+      CidrIp: 10.110.38.146/32
+      Description: Traffic to on-prem Mongo DB Prod
+
+  egressLayer4SG16:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref L4ECSSG
+      FromPort: 1521
+      IpProtocol: tcp
+      ToPort: 1521
+      CidrIp: 10.110.16.217/32
+      Description: Traffic to on-prem AMS DB Prod
+############################# Application LoadBalancer ##############################
+
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+        Scheme: !Ref ALBScheme
+        Subnets:
+          - Fn::ImportValue:
+              !Join ['-',[ "VPC", !FindInMap [AccountIDMap, !Ref "AWS::AccountId", VPCShortName], "A", !Ref ALBResourceTier, "SUBNET" ] ]
+          - Fn::ImportValue:
+              !Join ['-',[ "VPC", !FindInMap [AccountIDMap, !Ref "AWS::AccountId", VPCShortName], "B", !Ref ALBResourceTier, "SUBNET" ] ]
+          - Fn::ImportValue:
+              !Join ['-',[ "VPC", !FindInMap [AccountIDMap, !Ref "AWS::AccountId", VPCShortName], "C", !Ref ALBResourceTier, "SUBNET" ] ]
+        SecurityGroups: 
+          - !Ref L4ALBSG
+        Tags:
+            - Key: Name
+              Value: !Join
+                - '-'
+                - - Fn::Join:
+                    - ''
+                    - - "2"
+                      - !ImportValue  Account-Global-AccountCode
+                      - Fn::ImportValue:
+                          !Sub 'Account-Global-RegionCode-${AWS::Region}'
+                  - !Sub '${AppCode}'
+                  - !Sub '${AppName}'
+                  - 'ALB'
+            - Key: AppCode
+              Value: !Sub ${AppCode}
+
+  AlbListener01:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+        Certificates:
+          - CertificateArn: !ImportValue wildcard-fpl
+        LoadBalancerArn: !Ref Alb
+        Port: 443
+        Protocol: HTTPS
+        DefaultActions:
+            - Type: forward
+              TargetGroupArn: !Ref TargetGroup
+    DependsOn:
+      - TargetGroup
+      - Alb
+
+  AlbListener02:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      DefaultActions:
+        - Type: "redirect"
+          RedirectConfig:
+            Protocol: "HTTPS"
+            Port: 443
+            Host: "#{host}"
+            Path: "/#{path}"
+            Query: "#{query}"
+            StatusCode: "HTTP_301"
+      Port: 80
+      Protocol: "HTTP"
+    DependsOn:
+      - TargetGroup
+      - Alb
+
+############################# Application LoadBalancer default Target Group ##################
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+        TargetType: ip
+        Port: 443
+        Protocol: HTTPS
+        VpcId:
+          Fn::ImportValue:
+            Fn::Join:
+            - "-"
+            - - "VPC"
+              - !FindInMap [AccountIDMap, !Ref "AWS::AccountId", VPCShortName]
+              - "VPCID"
+        HealthCheckPath: '/'
+        HealthCheckTimeoutSeconds: 2
+        HealthCheckIntervalSeconds: 5
+        HealthyThresholdCount: 2
+        UnhealthyThresholdCount: 3
+        Matcher:
+          HttpCode: 200-499
+        TargetGroupAttributes:
+          - Key: deregistration_delay.timeout_seconds
+            Value: 60
+          - Key: slow_start.duration_seconds
+            Value: 30
+        Tags:
+            - Key: Name
+              Value: !Join
+                - '-'
+                - - Fn::Join:
+                    - ''
+                    - - "2"
+                      - !ImportValue  Account-Global-AccountCode
+                      - Fn::ImportValue:
+                          !Sub 'Account-Global-RegionCode-${AWS::Region}'
+                  - !Sub '${AppCode}'
+                  - 'TG'
+            - Key: AppCode
+              Value: !Sub ${AppCode}
+
+
+
+####################################### Outputs #############################################
+Outputs:
+  ECSClusterName:
+    Description: Name of ECS Cluster
+    Value: 
+      Ref: EcsCluster
+    Export:
+      Name: !Sub "NEE-${AppCode}-${AppName}-ECSCluster"
+  ECSClusterARN:
+    Description: ECS Cluster ARN
+    Value: 
+      !GetAtt EcsCluster.Arn
+    Export:
+      Name: !Sub "${AppCode}-${AppName}-ClusterARN"
+  AlbURL:
+    Description: ALB url
+    Value: !GetAtt Alb.DNSName
+    Export: 
+      Name: !Sub "NEE-${AppCode}-${AppName}-ALBURL"
+  TargetGroupARN:
+    Description: ARN of default target group
+    Value: 
+      Ref: TargetGroup
+    Export:
+      Name: !Sub "NEE-${AppCode}-${AppName}-TargetGroupARN"
+
+  TargetGroupName:
+    Description: Default target group full name
+    Value: !GetAtt TargetGroup.TargetGroupFullName
+    Export:
+      Name: !Sub "NEE-${AppCode}-${AppName}-TargetGroupName"
+
+  AlbARN:
+    Description:  Listener arn
+    Value:
+      Ref: AlbListener01
+    Export: 
+      Name: !Sub "NEE-${AppCode}-${AppName}-Listener"
+  
+  AlbLoadBalancerFullName:
+    Description:  Alb  FullName
+    Value:  !GetAtt Alb.LoadBalancerFullName
+    Export:
+      Name: !Sub "NEE-${AppCode}-${AppName}-ALBFullName"
+
+  L4ECSSGID:
+    Description:  Layer4 ECS Security Group
+    Value:
+      Ref: L4ECSSG
+    Export: 
+      Name: !Sub "NEE-${AppCode}-L4ECSSG"

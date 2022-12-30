@@ -1,0 +1,316 @@
+####################################################################################
+# Template for creating IAM roles reguired for ECS Cluster & Services for VE957
+# Created by: Murthy Vemparala
+# Environment:
+# Date:
+# Resources:
+#   IAM:
+#     - ECS Role
+#     - ECS Instance profile
+#     - ECS Task role
+#############################################################################################
+Description: This template is for creating IAM roles required for ECS Cluster & Services VE957
+#
+Parameters:
+  AppCode:
+    Type: String
+    MaxLength: "5"
+    Description: "The application code name cannot be of more that 5 characters"
+  AppCodeLower:
+    Type: String
+    MaxLength: "5"
+    Description: "The application code name cannot be of more that 5 characters"
+  EcsLaunchType:
+    Type: String
+    Description: "Select the ECS launch type"
+    AllowedValues:
+      - ec2
+      - fargate
+  VPCShortName:
+    Type: String
+    AllowedValues:
+      - EnterpriseProd
+      - Core
+      - CoreTest
+      - DMZ
+      - EnterpriseDev
+      - EnterpriseProd
+      - EnterpriseQA
+      - EnterpriseSandbox
+      - EnterpriseTest
+      - FPLDev
+      - FPLProd
+      - FPLQA
+      - FPLSandbox
+      - FPLTest
+      - IsolateSandbox
+      - NEERDev
+      - NEERProd
+      - NEERQA
+      - NEERSandbox
+      - NEERTest
+      - Security
+      - SecurityTest
+      - VDI
+      - VDIDR
+      - VDITest
+      - GulfPowerDev
+      - GulfPowerTest
+      - GulfPowerQA
+      - GulfPowerProd
+Conditions:
+  CreateResource: !Equals [!Ref EcsLaunchType, "ec2"]
+  IsDev: !Equals [!Ref VPCShortName, "FPLDev"]
+  NotDev: !Not [Condition: IsDev]
+Resources:
+  ## ECS role for ECS host (required only for EC2 launch type)
+  ECSRole:
+    Type: "AWS::IAM::Role"
+    Condition: CreateResource
+    Properties:
+      Path: /
+      RoleName: !Sub "NEE-ECS-${AppCode}-Role"
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Action": "sts:AssumeRole",
+                "Effect": "Allow",
+                "Principal": {
+                    "Service": ["ec2.amazonaws.com",
+                    "application-autoscaling.amazonaws.com",
+                    "ecs.amazonaws.com"]
+                }
+            }]
+        }
+      Policies:
+        - PolicyName: autoscale-service
+          PolicyDocument: |
+            {
+                "Statement": [
+                  {
+                      "Effect": "Allow",
+                      "Action": [
+                          "ecs:DescribeServices",
+                          "ecs:UpdateService"
+                      ],
+                      "Resource": [
+                          "*"
+                      ]
+                  },
+                  {
+                      "Effect": "Allow",
+                      "Action": [
+                          "cloudwatch:DescribeAlarms",
+                          "cloudwatch:PutMetricAlarm"
+                      ],
+                      "Resource": [
+                          "*"
+                      ]
+                  }
+                ]
+            }
+        - PolicyName: ecs-service
+          PolicyDocument: |
+            {
+                "Statement": [{
+                    "Effect": "Allow",
+                    "Action": [
+                        "ecs:CreateCluster",
+                        "ecs:DeregisterContainerInstance",
+                        "ecs:DiscoverPollEndpoint",
+                        "ecs:Poll",
+                        "ecs:RegisterContainerInstance",
+                        "ecs:StartTelemetrySession",
+                        "ecs:Submit*",
+                        "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
+                        "elasticloadbalancing:DeregisterTargets",
+                        "elasticloadbalancing:Describe*",
+                        "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
+                        "elasticloadbalancing:RegisterTargets"
+                    ],
+                    "Resource": "*"
+                }]
+            }
+        - PolicyName: ecr-service
+          PolicyDocument: |
+            {
+                "Statement": [{
+                    "Effect": "Allow",
+                    "Action": [
+                        "ecr:GetAuthorizationToken",
+                        "ecr:BatchCheckLayerAvailability",
+                        "ecr:GetDownloadUrlForLayer",
+                        "ecr:BatchGetImage"
+                    ],
+                    "Resource": "*"
+                }]
+            }
+        - PolicyName: logs
+          PolicyDocument: !Sub |
+            {
+                "Statement": [{
+                    "Effect": "Allow",
+                    "Action": [
+                        "logs:CreateLogStream",
+                        "logs:PutLogEvents"
+                    ],
+                    "Resource": "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*${AppCode}*:log-stream:*"
+                }]
+            }
+  ##
+  ## ECS Instance profile that gets attached to EC2 container host (required only for EC2 launch type)
+  ECSInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Condition: CreateResource
+    Properties:
+      Path: /
+      Roles:
+        - !Ref ECSRole
+  ##
+  ## ECS task execution role used by ECS services to connect with other AWS services
+  ECSTaskRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: /
+      RoleName: !Sub "NEE-ECS-${AppCode}-Task-Role"
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Action": "sts:AssumeRole",
+                "Effect": "Allow",
+                "Principal": {
+                    "Service": ["ecs-tasks.amazonaws.com"]
+                }
+            }]
+        }
+      Policies:
+        - PolicyName: ecr-service
+          PolicyDocument: !Sub |
+            {
+              "Statement": [
+                {
+                    "Sid": "ECRAuth",
+                    "Effect": "Allow",
+                    "Action": [
+                        "ecr:CreateRepository",
+                        "ecr:GetAuthorizationToken"
+                    ],
+                    "Resource": "*"
+                },
+                {
+                    "Sid": "ECRRW",
+                    "Effect": "Allow",
+                    "Action": "ecr:*",
+                    "Resource": "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/*${AppCodeLower}*"
+                }]
+            }
+        - PolicyName: logs-service
+          PolicyDocument: !Sub |
+            {
+              "Statement": [
+                {
+                    "Sid": "cwlogs",
+                    "Effect": "Allow",
+                    "Action": [
+                        "logs:DescribeLogGroups",
+                        "logs:DescribeDestinations",
+                        "logs:DescribeLogStreams",
+                        "logs:DescribeSubscriptionFilters",
+                        "logs:ListTagsLogGroup",
+                        "logs:CreateLogGroup",
+                        "logs:CreateLogStream",
+                        "logs:FilterLogEvents",
+                        "logs:PutLogEvents",
+                        "logs:PutSubscriptionFilter",
+                        "logs:GetLogEvents"
+                    ],
+                    "Resource": "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*${AppCode}*"
+                }]
+            }
+        - PolicyName: ecs-autoscaling-service
+          PolicyDocument: !Sub |
+            {
+                "Statement": [
+                    {
+                        "Sid": "ecsdefaultactions",
+                        "Effect": "Allow",
+                        "Action": [
+                          "autoscaling:DescribeAutoScalingGroups",
+                          "autoscaling:DescribeAutoScalingInstances",
+                          "cloudwatch:PutMetricData",
+                          "ec2:DescribeInstanceStatus",
+                          "ec2:DescribeInstances",
+                          "ec2messages:AcknowledgeMessage",
+                          "ec2messages:DeleteMessage",
+                          "ec2messages:FailMessage",
+                          "ec2messages:GetEndpoint",
+                          "ec2messages:GetMessages",
+                          "ec2messages:SendReply",
+                          "ecs:CreateCluster",
+                          "ecs:DeregisterContainerInstance",
+                          "ecs:DiscoverPollEndpoint",
+                          "ecs:Poll",
+                          "ecs:RegisterContainerInstance",
+                          "ecs:StartTelemetrySession",
+                          "ecs:Submit*"   
+                        ],
+                        "Resource": "*"
+                    },
+                    { 
+                      "Sid": "s3defaultactions",
+                      "Effect": "Allow",
+                      "Action": [
+                          "s3:AbortMultipartUpload",
+                          "s3:GetObject",
+                          "s3:ListBucket",
+                          "s3:ListBucketMultipartUploads",
+                          "s3:ListMultipartUploadParts",
+                          "s3:PutObject"
+                      ],
+                      "Resource": [
+                        "arn:aws:s3:::*${AppCodeLower}*",
+                        "arn:aws:s3:::*${AppCodeLower}*/*"
+                      ]
+                  }
+                ]
+            }
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+  ##
+#
+Outputs:
+  ECSRoleName:
+    Description: ECS Role name
+    Condition: CreateResource
+    Value: !Ref ECSRole
+    Export:
+      Name: !Sub "${AppCode}-ECS-Role-Name"
+  ECSRoleArn:
+    Description: ECS Role ARN
+    Condition: CreateResource
+    Value: !GetAtt ECSRole.Arn
+    Export:
+      Name: !Sub "${AppCode}-ECS-Role-ARN"
+  ECSInstanceProfileName:
+    Description: ECS Instance profile name
+    Condition: CreateResource
+    Value: !Ref ECSInstanceProfile
+    Export:
+      Name: !Sub "${AppCode}-ECS-InstanceProfile-Name"
+  ECSInstanceProfileArn:
+    Description: ECS Instance profile ARN
+    Condition: CreateResource
+    Value: !GetAtt ECSInstanceProfile.Arn
+    Export:
+      Name: !Sub "${AppCode}-ECS-InstanceProfile-ARN"
+  ECSTaskRoleName:
+    Description: ECS Task Role name
+    Value: !Ref ECSTaskRole
+    Export:
+      Name: !Sub "${AppCode}-ECS-TaskRole-Name"
+  ECSTaskRoleArn:
+    Description: ECS Task Role ARN
+    Value: !GetAtt ECSTaskRole.Arn
+    Export:
+      Name: !Sub "${AppCode}-ECS-TaskRole-ARN"

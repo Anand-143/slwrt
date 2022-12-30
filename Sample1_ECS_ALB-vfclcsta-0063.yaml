@@ -1,0 +1,516 @@
+###########################################################################################
+# AWS CloudFormation Template that provisions ADAT (AU762) ECS Cluster for Dev2
+# Last modified date: 
+# Last change:
+# JIRA Ticket : https://jira.nexteraenergy.com/browse/CLOUDSD-6430
+############################################################################################
+AWSTemplateFormatVersion: 2010-09-09
+Description: Template for ADAT (AU762) ECS Cluster for Dev2
+Parameters:
+  AppCode:
+    Type: String
+    MaxLength: 5
+    Description: The application code name cannot be more than 5 characters
+    ConstraintDescription: Appcode field does not match the required constraints
+    Default: AU762
+  AppName:
+    Type: String
+    Description: Application name
+    AllowedPattern: '^[A-Z0-9_\-]+$'
+    ConstraintDescription: Specify your application name
+    Default: ADAT2
+  ALBScheme:
+    Type: String
+    Description: Specify whether ALB is internet facing or intranet
+    Default: internal
+    AllowedValues:
+      - internet-facing
+      - internal
+  ALBResourceTier:
+    Description: Specify subnets for ALB
+    Type: String
+    AllowedValues:
+      - App
+      - DMZ
+      - Public
+      - Web
+    Default: Web
+  Requestor:
+    Type: String
+    Description: Please specify email address of the requestor
+    AllowedPattern: '^([a-zA-Z0-9_\-\.]+)@([a-zA-Z0-9_\-\.]+)\.([a-zA-Z]{2,5})$'
+    ConstraintDescription: Requestor field must be an email address
+    Default: Eduardo.Castillo@fpl.com
+  OwnerContact:
+    Type: String
+    Description: Please specify email address of the owner
+    AllowedPattern: '^([a-zA-Z0-9_\-\.]+)@([a-zA-Z0-9_\-\.]+)\.([a-zA-Z]{2,5})$'
+    ConstraintDescription: Requestor field must be an email address
+    Default: pratap.padhy@fpl.com
+  Environment:
+    Type: String
+    AllowedValues:
+      - Dev
+      - Test
+      - QA
+      - Prod
+      - DR
+    Default: Dev
+Mappings:
+  AccountIDMap:
+    '707512021127':
+      VPCShortName: Core
+    '359300531472':
+      VPCShortName: CoreTest
+    '889535458826':
+      VPCShortName: CoreDR
+    '434940588922':
+      VPCShortName: EnterpriseProd
+    '129801215131':
+      VPCShortName: EnterpriseQA
+    '288355943657':
+      VPCShortName: EnterpriseDev
+    '524246855650':
+      VPCShortName: EnterpriseSandbox
+    '120380718976':
+      VPCShortName: NEERProd
+    '926173705195':
+      VPCShortName: NEERQA
+    '733125211443':
+      VPCShortName: NEERDev
+    '484902404805':
+      VPCShortName: NEERSandbox
+    '678078281154':
+      VPCShortName: NEERTest
+    '430004966399':
+      VPCShortName: FPLProd
+    '485449107334':
+      VPCShortName: FPLQA
+    '977465404123':
+      VPCShortName: FPLDev
+    '237980099910':
+      VPCShortName: FPLSandbox
+    '688642023437':
+      VPCShortName: SecurityProd
+    '343234139589':
+      VPCShortName: SecurityTest
+    '480804328775':
+      VPCShortName: Isolation
+    '914606261750':
+      VPCShortName: NEERDR
+    '202055847252':
+      VPCShortName: FPLDR
+    '516627182506':
+      VPCShortName: FPLTest
+    '719322411134':
+      VPCShortName: GulfPowerDev
+    '546978450329':
+      VPCShortName: GulfPowerTest
+    '649713442868':
+      VPCShortName: GulfPowerQA
+    '374887338695':
+      VPCShortName: GulfPowerProd
+Resources:
+  EcsCluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties:
+      ClusterName: !Join 
+        - '-'
+        - - 'Fn::Join':
+              - ''
+              - - '2'
+                - !ImportValue Account-Global-AccountCode
+                - 'Fn::ImportValue': !Sub 'Account-Global-RegionCode-${AWS::Region}'
+          - !Sub '${AppCode}'
+          - !Sub '${AppName}'
+          - ECS
+      Tags:
+        - Key: Name
+          Value: !Join 
+            - '-'
+            - - 'Fn::Join':
+                  - ''
+                  - - '2'
+                    - !ImportValue Account-Global-AccountCode
+                    - 'Fn::ImportValue': !Sub 'Account-Global-RegionCode-${AWS::Region}'
+              - !Sub '${AppCode}'
+              - !Sub '${AppName}'
+              - ECS
+        - Key: AppCode
+          Value: !Ref AppCode
+        - Key: AppName
+          Value: !Ref AppName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Requestor
+          Value: !Ref Requestor
+        - Key: OwnerContact
+          Value: !Ref OwnerContact
+        - Key: StackName
+          Value: !Ref 'AWS::StackName'
+  L4ALBSG:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupName: !Join 
+        - '-'
+        - - L4
+          - !Ref AppCode
+          - App
+          - ALB
+          - !FindInMap 
+            - AccountIDMap
+            - !Ref 'AWS::AccountId'
+            - VPCShortName
+          - !ImportValue Account-Global-AccountCode
+          - SG2
+      GroupDescription: Layer 4 Security Group for ALB
+      VpcId:
+        'Fn::ImportValue':
+          'Fn::Join':
+            - '-'
+            - - VPC
+              - !FindInMap 
+                - AccountIDMap
+                - !Ref 'AWS::AccountId'
+                - VPCShortName
+              - VPCID
+      SecurityGroupIngress:
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/8
+          Description: (On-Prem) Allow HTTPS
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 172.0.0.0/8
+          Description: (On-Prem) Allow HTTPS
+      SecurityGroupEgress:
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/8
+          Description: Allow HTTPS to ECS SG
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+        - Key: AppName
+          Value: !Ref AppName
+        - Key: Name
+          Value: !Join 
+            - '-'
+            - - L4
+              - !Ref AppCode
+              - Web
+              - ALB
+              - !FindInMap 
+                - AccountIDMap
+                - !Ref 'AWS::AccountId'
+                - VPCShortName
+              - !ImportValue Account-Global-AccountCode
+              - SG2
+        - Key: Requestor
+          Value: !Ref Requestor
+        - Key: OwnerContact
+          Value: !Ref OwnerContact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackName
+          Value: !Ref 'AWS::StackName'
+  L4ALBIngressECS:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId:
+        Ref: L4ALBSG
+      IpProtocol: '-1'
+      SourceSecurityGroupId: !Ref L4ECSSG
+      Description: All traffic from a container in the host
+  L4ALBegressECS:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      GroupId:
+        Ref: L4ALBSG
+      IpProtocol: '-1'
+      DestinationSecurityGroupId: !Ref L4ECSSG
+      Description: All traffic to containers in the host
+  L4ECSSG:
+    DependsOn: L4ALBSG
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupName: !Join 
+        - '-'
+        - - L4
+          - !Ref AppCode
+          - App
+          - ECS
+          - !FindInMap 
+            - AccountIDMap
+            - !Ref 'AWS::AccountId'
+            - VPCShortName
+          - !ImportValue Account-Global-AccountCode
+          - SG2
+      GroupDescription: Layer 4 Security Group for ECS Cluster
+      VpcId:
+        'Fn::ImportValue':
+          'Fn::Join':
+            - '-'
+            - - VPC
+              - !FindInMap 
+                - AccountIDMap
+                - !Ref 'AWS::AccountId'
+                - VPCShortName
+              - VPCID
+      SecurityGroupEgress:
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/8
+          Description: (On-Prem) HTTPS Web port
+        - IpProtocol: TCP
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 10.0.0.0/8
+          Description: DNS port
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 127.0.0.0/32
+          Description: (Self) Loopback
+        - IpProtocol: TCP
+          FromPort: 1022
+          ToPort: 1022
+          CidrIp: 155.109.247.5/32
+          Description: to sc01
+        - IpProtocol: TCP
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 155.109.106.22/32
+          Description: Proxy Traffic
+        - IpProtocol: TCP
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 155.109.64.16/32
+          Description: Eva Proxy Traffic
+        - IpProtocol: TCP
+          FromPort: 1024
+          ToPort: 1024
+          CidrIp: 10.110.31.181/32
+          Description: to DBCPVIP
+        - IpProtocol: UDP
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 10.0.0.0/8
+          Description: DNS Port
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Allow all traffic
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+        - Key: AppName
+          Value: !Ref AppName
+        - Key: Name
+          Value: !Join 
+            - '-'
+            - - L4
+              - !Ref AppCode
+              - App
+              - ECS
+              - !FindInMap 
+                - AccountIDMap
+                - !Ref 'AWS::AccountId'
+                - VPCShortName
+              - !ImportValue Account-Global-AccountCode
+              - SG2
+        - Key: Requestor
+          Value: !Ref Requestor
+        - Key: OwnerContact
+          Value: !Ref OwnerContact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackName
+          Value: !Ref 'AWS::StackName'
+  L4ECSEgressALB:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      GroupId:
+        Ref: L4ECSSG
+      IpProtocol: '-1'
+      DestinationSecurityGroupId: !Ref L4ALBSG
+      Description: All traffic from ALB
+  L4ECSIngressALB:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId:
+        Ref: L4ECSSG
+      IpProtocol: '-1'
+      SourceSecurityGroupId: !Ref L4ALBSG
+      Description: All traffic from ALB
+
+  Alb:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Scheme: !Ref ALBScheme
+      Name: !Join 
+        - '-'
+        - - ECS
+          - !FindInMap 
+            - AccountIDMap
+            - !Ref 'AWS::AccountId'
+            - VPCShortName
+          - !Ref AppCode
+          - ALB02
+      Subnets:
+        - 'Fn::ImportValue': !Join 
+            - '-'
+            - - VPC
+              - !FindInMap 
+                - AccountIDMap
+                - !Ref 'AWS::AccountId'
+                - VPCShortName
+              - A
+              - !Ref ALBResourceTier
+              - SUBNET
+        - 'Fn::ImportValue': !Join 
+            - '-'
+            - - VPC
+              - !FindInMap 
+                - AccountIDMap
+                - !Ref 'AWS::AccountId'
+                - VPCShortName
+              - B
+              - !Ref ALBResourceTier
+              - SUBNET
+        - 'Fn::ImportValue': !Join 
+            - '-'
+            - - VPC
+              - !FindInMap 
+                - AccountIDMap
+                - !Ref 'AWS::AccountId'
+                - VPCShortName
+              - C
+              - !Ref ALBResourceTier
+              - SUBNET
+      SecurityGroups:
+        - !Ref L4ALBSG
+      Tags:
+        - Key: Name
+          Value: !Join 
+            - '-'
+            - - 'Fn::Join':
+                  - ''
+                  - - '2'
+                    - !ImportValue Account-Global-AccountCode
+                    - 'Fn::ImportValue': !Sub 'Account-Global-RegionCode-${AWS::Region}'
+              - !Sub '${AppCode}'
+              - !Sub '${AppName}'
+              - ALB02
+        - Key: AppCode
+          Value: !Ref AppCode
+        - Key: AppName
+          Value: !Ref AppName
+        - Key: AppCode
+          Value: !Ref AppCode
+        - Key: Requestor
+          Value: !Ref Requestor
+        - Key: OwnerContact
+          Value: !Ref OwnerContact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackName
+          Value: !Ref 'AWS::StackName'
+  AlbListener01:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      Certificates:
+        - CertificateArn: !ImportValue wildcard-fpl
+      LoadBalancerArn: !Ref Alb
+      Port: 443
+      Protocol: HTTPS
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+  TargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      TargetType: ip
+      Name: !Sub '${AppCode}-ADATSERVICE2-TG'
+      Port: 8080
+      Protocol: HTTP
+      VpcId:
+        'Fn::ImportValue': !Join 
+          - '-'
+          - - VPC
+            - !FindInMap 
+              - AccountIDMap
+              - !Ref 'AWS::AccountId'
+              - VPCShortName
+            - VPCID
+      HealthCheckPath: /
+      HealthCheckTimeoutSeconds: 2
+      HealthCheckIntervalSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: '200'
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '60'
+        - Key: slow_start.duration_seconds
+          Value: '30'
+      Tags:
+        - Key: Name
+          Value: !Join 
+            - '-'
+            - - 'Fn::Join':
+                  - ''
+                  - - '2'
+                    - !ImportValue Account-Global-AccountCode
+                    - 'Fn::ImportValue': !Sub 'Account-Global-RegionCode-${AWS::Region}'
+              - !Sub '${AppCode}'
+              - !Sub '${AppName}'
+              - TG
+        - Key: AppCode
+          Value: !Ref AppCode
+        - Key: AppName
+          Value: !Ref AppName
+        - Key: Requestor
+          Value: !Ref Requestor
+        - Key: OwnerContact
+          Value: !Ref OwnerContact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackName
+          Value: !Ref 'AWS::StackName'
+Outputs:
+  ECSClusterName:
+    Description: Name of ECS Cluster
+    Value:
+      Ref: EcsCluster
+    Export:
+      Name: !Sub 'NEE-${AppCode}-${AppName}-ECSCluster'
+  AlbURL:
+    Description: ALB url
+    Value: !GetAtt Alb.DNSName
+    Export:
+      Name: !Sub 'NEE-${AppCode}-${AppName}-ALBURL'
+  AlbListenerARN:
+    Description: Listener arn
+    Value:
+      Ref: AlbListener01
+    Export:
+      Name: !Sub 'NEE-${AppCode}-${AppName}-Listener'
+  TargetGroupARN:
+    Description: Target group arn
+    Value:
+      Ref: TargetGroup
+    Export:
+      Name: !Sub 'NEE-${AppCode}-${AppName}-TargetGroup'
+  L4ECSSGID:
+    Description: Layer4 ECS Security GroupId
+    Value:
+      Ref: L4ECSSG
+    Export:
+      Name: !Sub 'NEE-${AppCode}-${AppName}-L4ECSSG'

@@ -1,0 +1,410 @@
+#############################################################################################
+# Template to deploy ECS service (Fargate launch type)
+# Created by:
+# Creation date:
+# Last modified by:
+# Last modified date:
+# Resources:
+#   ECS:
+#     - Service
+#     - TaskDefinition
+#   ELB:
+#     - ListenerRule
+#     - TargetGroup
+#############################################################################################
+AWSTemplateFormatVersion: 2010-09-09
+Description: Template to deploy ECS service
+Parameters:
+  VPCShortName:
+    Type: String
+    AllowedValues:
+      - Core
+      - CoreDR
+      - CoreTest
+      - EnterpriseDR
+      - EnterpriseDev
+      - EnterpriseProd
+      - EnterpriseQA
+      - EnterpriseSandbox
+      - FPLDR
+      - FPLDev
+      - FPLProd
+      - FPLQA
+      - FPLSandbox
+      - FPLTest
+      - GexaDev
+      - GexaDR
+      - GexaProd
+      - GexaQA
+      - GexaTest
+      - GulfPowerDev
+      - GulfPowerDR
+      - GulfPowerProd
+      - GulfPowerQA
+      - GulfPowerSandbox
+      - GulfPowerTest
+      - NEERDR
+      - NEERDev
+      - NEERProd
+      - NEERQA
+      - NEERSandbox
+      - NEERTest
+  AppCode:
+    Type: String
+    MaxLength: 5
+    Description: The application code name cannot be of more that 5 characters
+  AppCodeLower:
+    Type: String
+    MaxLength: 5
+    AllowedPattern: "^[a-z0-9]+$"
+    Description: The application code name cannot be of more that 5 characters in lowercase
+  AppName:
+    Type: String
+    Description: Application name
+    AllowedPattern: '^[A-Za-z0-9_\-]+$'
+    ConstraintDescription: Specify your application name
+  AppNameLower:
+    Type: String
+    Description: Application name
+    AllowedPattern: '^[a-z0-9_\-]+$'
+    ConstraintDescription: Specify your application name in lowercase
+  SvcName:
+    Type: String
+    Description: Service name
+    AllowedPattern: '^[A-Za-z0-9_\-]+$'
+    ConstraintDescription: Specify service name
+    Default: VMUIService
+  SvcPort:
+    Type: String
+    Default: 80
+    Description: Container port
+  MaxMemory:
+    Type: String
+    Default: 4096
+    Description: Memory hard limit for this container
+  MinMemory:
+    Type: String
+    Default: 1024
+    Description: Memory soft limit for this container (maintain cpu:memory as 1:2)
+  CPU:
+    Type: String
+    Description: >-
+      Specify CPU parameter and max memory configuration must be calculated based
+      on this value
+    Default: 1024
+    AllowedValues:
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+  SvcNameLower:
+    Type: String
+    Description: Service name
+    AllowedPattern: '^[a-z0-9_\-]+$'
+    ConstraintDescription: Specify service name in lowercase
+    Default: vmuiservice
+  RepoVersion:
+    Type: String
+    Default: "latest"
+    Description: Specify ECR repo version
+  RepoName:
+    Type: String
+    Description: Specify ECR repo name
+    Default: "ve957/vegetationmanagement/vmuiservice"
+
+  MaxCount:
+    Type: Number
+  MinCount:
+    Type: Number
+  DesiredCount:
+    Type: Number
+    Default: 1
+  ListenerPath:
+    Type: String
+    Description: Specify listener path (context path)
+    Default: "/*"
+  ListenerPriority:
+    Type: String
+    Description: "Listener priority must be unique value for the listener"
+    Default: 2
+
+  CreateECSService:
+    Type: String
+    Description: "Select true to create ECS service. For initial deployment select false to ignore"
+    AllowedValues:
+      - true
+      - false
+
+  RequiresCompatibilities:
+    Type: String
+    Description: Type of container deployment as EC2 or FARGATE
+    Default: FARGATE
+  #
+  # ALB TG health check parameters
+  HealthCheckPath:
+    Type: String
+    Description: The ping path that is the destination on the targets for health checks
+    Default: "/"
+  HealthCheckProtocol:
+    Type: String
+    Description: The protocol the load balancer uses when performing health checks on targets
+    Default: HTTP
+    AllowedValues:
+      - HTTP
+      - HTTPS
+  HealthCheckPort:
+    Type: String
+    Description: The port the load balancer uses when performing health checks on targets
+    Default: 80
+  HealthCheckTimeout:
+    Type: String
+    Description: The approximate number of seconds between health checks for an individual target and this value must be smaller than HealthCheckInterval
+    Default: 5
+  HealthCheckInterval:
+    Type: String
+    Description: The approximate number of seconds between health checks for an individual target
+    Default: 30
+  HealthyThresholdCount:
+    Type: String
+    Description: The number of consecutive successful health checks that are required before an unhealthy target is considered healthy
+    Default: 3
+  UnhealthyThresholdCount:
+    Type: String
+    Description: The number of consecutive failed health checks that are required before a target is considered unhealthy.
+    Default: 5
+  HealthCheckHttpCode:
+    Type: String
+    Description: The HTTP codes that a healthy target must use when responding to a health check, such as 200,202 or 200-399
+    Default: "200"
+  #
+  # ALB TG params
+  ALBTGPort:
+    Type: String
+    Description: The port on which the targets receive traffic
+    Default: 80
+  ALBTGPortocol:
+    Type: String
+    Description: The protocol to use for routing traffic to the targets
+    Default: HTTP
+    AllowedValues:
+      - HTTP
+      - HTTPS
+      - TCP
+
+  ALBTGGroupType:
+    Type: String
+    Description: The type of target that you must specify when registering targets with this target group. You can't specify targets for a target group using more than one target type
+    Default: ip
+    AllowedValues:
+      - instance
+      - ip
+      - lambda
+
+  ALB01AZ:
+    Description: Enter minimum of 2 AZ's like A,B or B,C or A,C or A,B,C
+    Type: String
+    AllowedValues:
+      - A,B,
+      - A,C,
+      - A,B,
+      - B,C,
+      - A,B,C,
+
+  ALB01ResourceTier:
+    Type: String
+    AllowedValues:
+      - App
+      - Web
+      - Visibility
+      - White
+      - Prime
+      - DMZ
+      - Public
+    Description: "The subnet where ECS will reside"
+
+Conditions:
+  CreateECSService: !Equals [!Ref CreateECSService, "true"]
+  DoesAz3exists: !Not [!Equals [!Select [2, !Split [",", !Ref ALB01AZ]], ""]]
+
+Resources:
+  #
+  Service:
+    Type: "AWS::ECS::Service"
+    Condition: CreateECSService
+    DependsOn:
+      - ALBListenerRule
+      - TaskDefinition
+    Properties:
+      ServiceName: !Sub "${AppCodeLower}-${SvcNameLower}"
+      LaunchType: !Ref RequiresCompatibilities
+      Cluster:
+        "Fn::ImportValue": !Sub "${AppCode}-ECS-Cluster"
+      DesiredCount: !Ref DesiredCount
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      TaskDefinition: !Ref TaskDefinition
+      LoadBalancers:
+        - ContainerPort: !Ref SvcPort
+          ContainerName: !Sub "${AppCode}-${SvcName}"
+          TargetGroupArn: !Ref ALBTG
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - "Fn::ImportValue": !Sub "${AppCode}-ECS-SG"
+          Subnets:
+            - !ImportValue
+              "Fn::Join":
+                - "-"
+                - - VPC
+                  - !Ref VPCShortName
+                  - !Select [0, !Split [",", !Ref ALB01AZ]]
+                  - !Ref ALB01ResourceTier
+                  - SUBNET
+            - !ImportValue
+              "Fn::Join":
+                - "-"
+                - - VPC
+                  - !Ref VPCShortName
+                  - !Select [1, !Split [",", !Ref ALB01AZ]]
+                  - !Ref ALB01ResourceTier
+                  - SUBNET
+            - Fn::If:
+                - DoesAz3exists
+                - !ImportValue
+                  "Fn::Join":
+                    - "-"
+                    - - VPC
+                      - !Ref VPCShortName
+                      - !Select [2, !Split [",", !Ref ALB01AZ]]
+                      - !Ref ALB01ResourceTier
+                      - SUBNET
+                - !Ref "AWS::NoValue"
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+
+  #
+  TaskDefinition:
+    Type: "AWS::ECS::TaskDefinition"
+    Properties:
+      Cpu: !Ref CPU
+      Memory: !Ref MaxMemory
+      TaskRoleArn: !ImportValue
+        "Fn::Sub": "${AppCode}-ECS-TaskRole-ARN"
+      ExecutionRoleArn: !ImportValue
+        "Fn::Sub": "${AppCode}-ECS-TaskRole-ARN"
+      Family: !Join
+        - "-"
+        - - !Join
+            - ""
+            - - "2"
+              - !ImportValue Account-Global-AccountCode
+              - !ImportValue
+                "Fn::Sub": "Account-Global-RegionCode-${AWS::Region}"
+          - !Sub "${AppCode}"
+          - !Sub "${SvcName}"
+          - "TD"
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - !Ref RequiresCompatibilities
+      ContainerDefinitions:
+        - Name: !Sub "${AppCode}-${SvcName}"
+          Image: !Sub >-
+            ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepoName}:${RepoVersion}
+          MemoryReservation: !Ref MinMemory
+          Cpu: !Ref CPU
+          PortMappings:
+            - ContainerPort: !Ref SvcPort
+              Protocol: tcp
+          Essential: "true"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !ImportValue
+                "Fn::Sub": "${AppCode}-ECS-Services-LG"
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: !Ref AppNameLower
+      Volumes:
+        - Name: my-vol
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+
+  ALBListenerRule:
+    Type: "AWS::ElasticLoadBalancingV2::ListenerRule"
+    DependsOn:
+      - ALBTG
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTG
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref ListenerPath
+      ListenerArn:
+        "Fn::ImportValue": !Sub "${AppCode}-ALB-DefaultListener-ARN"
+      Priority: !Ref ListenerPriority
+  #
+  ALBTG:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      Name: !Join
+        - "-"
+        - - !Join
+            - ""
+            - - "2"
+              - !ImportValue Account-Global-AccountCode
+              - !ImportValue
+                "Fn::Sub": "Account-Global-RegionCode-${AWS::Region}"
+          - !Sub "${AppCode}"
+          - !Sub "${SvcName}"
+          - "TG"
+      Port: !Ref ALBTGPort
+      Protocol: !Ref ALBTGPortocol
+      TargetType: !Ref ALBTGGroupType
+      VpcId:
+        Fn::ImportValue:
+          Fn::Join:
+            - "-"
+            - - "VPC"
+              - Ref: VPCShortName
+              - "VPCID"
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckProtocol: !Ref HealthCheckProtocol
+      #HealthCheckPort: !Ref HealthCheckPort
+      HealthCheckTimeoutSeconds: !Ref HealthCheckTimeout
+      HealthCheckIntervalSeconds: !Ref HealthCheckInterval
+      HealthyThresholdCount: !Ref HealthyThresholdCount
+      UnhealthyThresholdCount: !Ref UnhealthyThresholdCount
+      Matcher:
+        HttpCode: !Ref HealthCheckHttpCode
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+        - Key: ServiceName
+          Value: !Ref SvcName
+        - Key: Name
+          Value: !Join
+            - "-"
+            - - !Join
+                - ""
+                - - "2"
+                  - !ImportValue Account-Global-AccountCode
+                  - !ImportValue
+                    "Fn::Sub": "Account-Global-RegionCode-${AWS::Region}"
+              - !Sub "${AppCode}"
+              - !Sub "${SvcName}"
+              - "TG"
+#
+Outputs:
+  ##
+  ALBTargetGroup:
+    Description: "ALB target group for ALB01"
+    Value: !Ref ALBTG
+
+  ALBHttpsListenerRule:
+    Description: "ALB HTTPS listener for ALB01"
+    Value: !Ref ALBListenerRule

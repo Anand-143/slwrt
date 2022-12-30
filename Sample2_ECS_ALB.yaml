@@ -1,0 +1,413 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Template for NonCash Portal (AppCode DE949) Service & Task definition
+Parameters:
+  AppCode:
+    Type: String
+    MaxLength: 5
+    Description: The application code name cannot be of more that 5 characters'
+    Default: DE949
+  AppName:
+    Type: String
+    Description: Application name
+    AllowedPattern: '^[A-Za-z0-9_\-]+$'
+    ConstraintDescription: Specify your application name
+    Default: NONCASHPORTAL
+  SvcName:
+    Type: String
+    Description: Service name
+    AllowedPattern: '^[A-Za-z0-9_\-]+$'
+    ConstraintDescription: Specify service name
+    Default: NonCashService
+  ECRUrl:
+    Type: String
+    Default: >-
+      977465404123.dkr.ecr.us-east-1.amazonaws.com/de949/noncashdepositportal/noncashportal
+  SvcPath:
+    Description: >-
+      Enter context path for service (/path-name) which is used for listener
+      rule
+    Default: /v1/surety-bond
+    Type: String
+  HealthCheckPath:
+    Description: >-
+      Enter healthcheck path for service (/path-name) which is used for health
+      check
+    Default: /v1/surety-bond/health
+    Type: String
+  ListenerPriority:
+    Type: String
+    Description: Listener priority
+    Default: 10
+  ImageVersion:
+    Type: String
+    Description: Specify Image version
+    Default: latest
+  MaxCount:
+    Type: Number
+    Default: 2
+  MinCount:
+    Type: Number
+    Default: 1
+  CPU:
+    Description: CPU credits for service
+    Type: String
+    Default: 512
+  Memory:
+    Description: Memory must be two times the CPU count
+    Type: String
+    Default: 1024
+  Environment:
+    Type: String
+    AllowedValues:
+      - Dev
+      - Test
+      - QA
+      - Prod
+      - DR
+    Default: Dev
+  Requestor:
+    Type: String
+    Description: Please specify email address of the requestor
+    AllowedPattern: '^([a-zA-Z0-9_\-\.]+)@([a-zA-Z0-9_\-\.]+)\.([a-zA-Z]{2,5})$'
+    ConstraintDescription: Requestor field must be an email address
+    Default: Ashok.Pendli@fpl.com
+  OwnerContact:
+    Type: String
+    Description: Please specify email address of the owner
+    AllowedPattern: '^([a-zA-Z0-9_\-\.]+)@([a-zA-Z0-9_\-\.]+)\.([a-zA-Z]{2,5})$'
+    ConstraintDescription: Requestor field must be an email address
+    Default: Silvia.e.Cuadra@fpl.com
+  Ec2ResourceTier:
+    Description: Specify subnets for Ec2's
+    Type: String
+    AllowedValues:
+      - App
+      - DMZ
+    Default: App
+Mappings:
+  AccountIDMap:
+    '707512021127':
+      VPCShortName: Core
+    '359300531472':
+      VPCShortName: CoreTest
+    '889535458826':
+      VPCShortName: CoreDR
+    '434940588922':
+      VPCShortName: EnterpriseProd
+    '129801215131':
+      VPCShortName: EnterpriseQA
+    '288355943657':
+      VPCShortName: EnterpriseDev
+    '524246855650':
+      VPCShortName: EnterpriseSandbox
+    '120380718976':
+      VPCShortName: NEERProd
+    '926173705195':
+      VPCShortName: NEERQA
+    '733125211443':
+      VPCShortName: NEERDev
+    '484902404805':
+      VPCShortName: NEERSandbox
+    '678078281154':
+      VPCShortName: NEERTest
+    '430004966399':
+      VPCShortName: FPLProd
+    '485449107334':
+      VPCShortName: FPLQA
+    '977465404123':
+      VPCShortName: FPLDev
+    '237980099910':
+      VPCShortName: FPLSandbox
+    '688642023437':
+      VPCShortName: SecurityProd
+    '343234139589':
+      VPCShortName: SecurityTest
+    '480804328775':
+      VPCShortName: Isolation
+    '914606261750':
+      VPCShortName: NEERDR
+    '202055847252':
+      VPCShortName: FPLDR
+    '516627182506':
+      VPCShortName: FPLTest
+    '719322411134':
+      VPCShortName: GulfPowerDev
+    '546978450329':
+      VPCShortName: GulfPowerTest
+    '649713442868':
+      VPCShortName: GulfPowerQA
+    '374887338695':
+      VPCShortName: GulfPowerProd
+Resources:
+  TargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Join 
+        - '-'
+        - - !Sub '${AppCode}'
+          - !Sub '${SvcName}'
+          - TG
+      TargetType: ip
+      Port: 8080
+      Protocol: HTTP
+      VpcId:
+        'Fn::ImportValue': !Join 
+          - '-'
+          - - VPC
+            - !FindInMap 
+              - AccountIDMap
+              - !Ref 'AWS::AccountId'
+              - VPCShortName
+            - VPCID
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckTimeoutSeconds: 2
+      HealthCheckIntervalSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: '200'
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '60'
+        - Key: slow_start.duration_seconds
+          Value: '30'
+      Tags:
+        - Key: Name
+          Value: !Join 
+            - '-'
+            - - 'Fn::Join':
+                  - ''
+                  - - '2'
+                    - !ImportValue Account-Global-AccountCode
+                    - 'Fn::ImportValue': !Sub 'Account-Global-RegionCode-${AWS::Region}'
+              - !Sub '${AppCode}'
+              - !Sub '${AppName}'
+              - !Sub '${SvcName}'
+              - TG
+        - Key: AppCode
+          Value: !Ref AppCode
+        - Key: AppName
+          Value: !Ref AppName
+        - Key: Requestor
+          Value: !Ref Requestor
+        - Key: OwnerContact
+          Value: !Ref OwnerContact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackName
+          Value: !Ref 'AWS::StackName'
+  ALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - !Ref SvcPath
+      ListenerArn:
+        'Fn::ImportValue': !Sub 'NEE-${AppCode}-${AppName}-Listener'
+      Priority: !Ref ListenerPriority
+  CloudwatchApplogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Join 
+        - '-'
+        - - 'Fn::Join':
+              - ''
+              - - '2'
+                - !ImportValue Account-Global-AccountCode
+                - 'Fn::ImportValue': !Sub 'Account-Global-RegionCode-${AWS::Region}'
+          - !Sub '${AppCode}'
+          - !Sub '${AppName}'
+          - !Sub '${SvcName}'
+          - LG
+      RetentionInDays: 90
+  Service:
+    Type: 'AWS::ECS::Service'
+    Properties:
+      ServiceName: !Sub 'NEE-${AppCode}-${AppName}-${SvcName}'
+      Cluster:
+        'Fn::ImportValue': !Sub 'NEE-${AppCode}-${AppName}-ECSCluster'
+      DesiredCount: !Ref MinCount
+      HealthCheckGracePeriodSeconds: 120
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      LoadBalancers:
+        - TargetGroupArn: !Ref TargetGroup
+          ContainerPort: 8080
+          ContainerName: !Sub 'NEE-${AppCode}-${AppName}-${SvcName}'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - 'Fn::ImportValue': !Sub 'NEE-${AppCode}-${AppName}-L4ECSSG'
+          Subnets:
+            - 'Fn::ImportValue': !Join 
+                - '-'
+                - - VPC
+                  - !FindInMap 
+                    - AccountIDMap
+                    - !Ref 'AWS::AccountId'
+                    - VPCShortName
+                  - A
+                  - !Ref Ec2ResourceTier
+                  - SUBNET
+            - 'Fn::ImportValue': !Join 
+                - '-'
+                - - VPC
+                  - !FindInMap 
+                    - AccountIDMap
+                    - !Ref 'AWS::AccountId'
+                    - VPCShortName
+                  - B
+                  - !Ref Ec2ResourceTier
+                  - SUBNET
+            - 'Fn::ImportValue': !Join 
+                - '-'
+                - - VPC
+                  - !FindInMap 
+                    - AccountIDMap
+                    - !Ref 'AWS::AccountId'
+                    - VPCShortName
+                  - C
+                  - !Ref Ec2ResourceTier
+                  - SUBNET
+      TaskDefinition: !Ref TaskDefinition
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+        - Key: AppName
+          Value: !Ref AppName
+        - Key: Requestor
+          Value: !Ref Requestor
+        - Key: OwnerContact
+          Value: !Ref OwnerContact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackName
+          Value: !Ref 'AWS::StackName'
+  TaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: !Join 
+        - '-'
+        - - !Join 
+            - ''
+            - - '2'
+              - !ImportValue Account-Global-AccountCode
+              - !ImportValue 
+                'Fn::Sub': 'Account-Global-RegionCode-${AWS::Region}'
+          - !Sub '${AppCode}'
+          - !Sub '${SvcName}'
+          - TD
+      NetworkMode: awsvpc
+      Cpu: !Ref CPU
+      Memory: !Ref Memory
+      RequiresCompatibilities:
+        - FARGATE
+      TaskRoleArn: NEE-DE949-NonCashPortal-ECS-ROLE
+      ExecutionRoleArn: NEE-DE949-NonCashPortal-ECS-ROLE
+      ContainerDefinitions:
+        - Name: !Sub 'NEE-${AppCode}-${AppName}-${SvcName}'
+          Image: !Sub '${ECRUrl}'
+          PortMappings:
+            - ContainerPort: 8080
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CloudwatchApplogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub '${AppCode}-${AppName}-${SvcName}'
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+        - Key: AppName
+          Value: !Ref AppName
+        - Key: Requestor
+          Value: !Ref Requestor
+        - Key: OwnerContact
+          Value: !Ref OwnerContact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackName
+          Value: !Ref 'AWS::StackName'
+  ServiceAutoScaling:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    Properties:
+      MaxCapacity: !Ref MaxCount
+      MinCapacity: !Ref MinCount
+      ResourceId: !Join 
+        - /
+        - - service
+          - 'Fn::ImportValue': !Sub 'NEE-${AppCode}-${AppName}-ECSCluster'
+          - !GetAtt Service.Name
+      RoleARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/NEE-${AppCode}-NonCashPortal-ECS-ROLE'
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+  ServiceScaleOutPolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: Service ScaleOutPolicy
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref ServiceAutoScaling
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 300
+        MetricAggregationType: Average
+        StepAdjustments:
+          - MetricIntervalLowerBound: 0
+            ScalingAdjustment: 2
+  ServiceScaleInPolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: Service ScaleInPolicy
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref ServiceAutoScaling
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 300
+        MetricAggregationType: Average
+        StepAdjustments:
+          - MetricIntervalUpperBound: 0
+            ScalingAdjustment: -1
+  CPUScaleOutAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: Scale Up if CPU is greater than 80% for 10 minutes
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 80
+      AlarmActions:
+        - Ref: ServiceScaleOutPolicy
+      Dimensions:
+        - Name: ClusterName
+          Value:
+            'Fn::ImportValue': !Sub 'NEE-${AppCode}-${AppName}-ECSCluster'
+        - Name: ServiceName
+          Value: !GetAtt Service.Name
+  CPUScaleInAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: Scale down if CPU is Lower than 60% for 10 minutes
+      ComparisonOperator: LessThanThreshold
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 60
+      AlarmActions:
+        - Ref: ServiceScaleInPolicy
+      Dimensions:
+        - Name: ClusterName
+          Value:
+            'Fn::ImportValue': !Sub 'NEE-${AppCode}-${AppName}-ECSCluster'
+        - Name: ServiceName
+          Value: !GetAtt Service.Name
