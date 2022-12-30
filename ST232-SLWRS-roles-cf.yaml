@@ -1,0 +1,377 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Serverless SLWRT Roles Stack
+
+Parameters:
+  AppCode:
+    Type: String
+    Default: ST232
+  AppCodeLower:
+    Type: String
+    Default: st232
+  AppName:
+    Type: String
+    Default: SLWRS
+  AppNameLower:
+    Type: String
+    Default: slwrs
+  Region:
+    Type: String
+    AllowedValues:
+      - us-east-1
+      - us-east-2
+    Default: us-east-1
+  Department:
+    Type: String
+    Default: "Customer Service IT"
+  OwnerContact:
+    Type: String
+    Default: "anand.avadutha@nexteraenergy.com"
+
+Mappings:
+  AccountIDMap:
+    "237980099910":
+      VPCShortName: FPLSandbox
+      VPCShortNameLower: fplsandbox
+    "977465404123":
+      VPCShortName: FPLDev
+      VPCShortNameLower: fpldev
+    "516627182506":
+      VPCShortName: FPLTest
+      VPCShortNameLower: fpltest
+    "485449107334":
+      VPCShortName: FPLQA
+      VPCShortNameLower: fplqa
+    "430004966399":
+      VPCShortName: FPLProd
+      VPCShortNameLower: fplprod
+    "202055847252":
+      VPCShortName: FPLDR
+      VPCShortNameLower: fpldr
+
+Resources:
+  SftpRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - transfer.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      RoleName: !Sub "${AppCodeLower}-${AppNameLower}-SFTP-Role"
+      Policies:
+        - PolicyName: !Sub "${AppCodeLower}-${AppNameLower}-SFTP-Policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:aws:s3:::*${AppCodeLower}*"
+                  - !Sub "arn:aws:s3:::*${AppCodeLower}*/*"
+      Tags:
+        - Key: AppCode
+          Value: !Sub ${AppCode}
+  RDSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - rds.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      RoleName: !Sub "${AppCodeLower}-${AppName}-RDS-Role"
+      Policies:
+        - PolicyName: !Sub "${AppCodeLower}-${AppName}-RDS-Policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::*${AppCodeLower}*"
+                  - !Sub "arn:aws:s3:::*${AppCodeLower}*/*"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:UntagResource
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:CancelRotateSecret
+                  - secretsmanager:ListSecretVersionIds
+                  - secretsmanager:UpdateSecret
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:PutResourcePolicy
+                  - secretsmanager:RestoreSecret
+                  - secretsmanager:RotateSecret
+                  - secretsmanager:UpdateSecretVersionStage
+                  - secretsmanager:TagResource
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:DeleteResourcePolicy
+                  - secretsmanager:GetRandomPassword
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:ListLayers
+                  - secretsmanager:ListSecrets
+                  - secretsmanager:UpdateSecret
+                Resource:
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+      Tags:
+        - Key: AppCode
+          Value: !Sub ${AppCode}
+  APIGatewayCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      RoleName: !Sub "${AppCodeLower}-${AppName}-API-Gateway-Logs-Role"
+      Tags:
+        - Key: AppCode
+          Value: !Sub ${AppCode}
+      Policies:
+        - PolicyName: !Sub "${AppCodeLower}-${AppName}-API-Gateway-Logs-Policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+                  - logs:GetLogEvents
+                  - logs:FilterLogEvents
+                Resource:
+                  - !Sub "arn:aws:apigateway:${AWS::Region}:${AWS::AccountId}:*${AppCodeLower}*"
+      Tags:
+        - Key: AppCode
+          Value: !Sub ${AppCode}
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      RoleName: !Sub "${AppCodeLower}-${AppName}-Lambda-Role"
+      Tags:
+        - Key: AppCode
+          Value: !Sub ${AppCode}
+      Policies:
+        - PolicyName: !Sub "${AppCodeLower}-${AppName}-Lambda-Policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                  - s3:PutObject
+                  - s3:GetObjectRetention
+                  - s3:DeleteObjectVersion
+                  - s3:GetObjectVersionTagging
+                  - s3:RestoreObject
+                  - s3:PutObjectLegalHold
+                  - s3:GetObjectLegalHold
+                  - s3:ListMultipartUploadParts
+                  - s3:ReplicateObject
+                  - s3:GetObjectVersionTorrent
+                  - s3:PutObject
+                  - s3:GetObjectAcl
+                  - s3:GetObject
+                  - s3:GetObjectTorrent
+                  - s3:AbortMultipartUpload
+                  - s3:PutObjectRetention
+                  - s3:GetObjectVersionAcl
+                  - s3:GetObjectTagging
+                  - s3:GetObjectVersionForReplication
+                  - s3:DeleteObject
+                  - s3:ReplicateDelete
+                  - s3:GetObjectVersion
+                Resource:
+                  - !Sub "arn:aws:s3:::*${AppCodeLower}*/*"
+              - Effect: Allow
+                Action:
+                  - s3:ListBucketByTags
+                  - s3:GetLifecycleConfiguration
+                  - s3:GetBucketTagging
+                  - s3:GetInventoryConfiguration
+                  - s3:PutAnalyticsConfiguration
+                  - s3:PutAccelerateConfiguration
+                  - s3:ListBucketVersions
+                  - s3:GetBucketLogging
+                  - s3:CreateBucket
+                  - s3:GetAccelerateConfiguration
+                  - s3:GetBucketPolicy
+                  - s3:PutBucketPolicy
+                  - s3:DeleteBucketPolicy
+                  - s3:PutEncryptionConfiguration
+                  - s3:GetEncryptionConfiguration
+                  - s3:GetBucketObjectLockConfiguration
+                  - s3:DeleteBucketWebsite
+                  - s3:GetBucketRequestPayment
+                  - s3:PutLifecycleConfiguration
+                  - s3:UpdateJobPriority
+                  - s3:GetMetricsConfiguration
+                  - s3:DeleteBucket
+                  - s3:PutBucketVersioning
+                  - s3:PutBucketTagging
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:GetBucketPolicyStatus
+                  - s3:ListBucketMultipartUploads
+                  - s3:GetBucketWebsite
+                  - s3:PutMetricsConfiguration
+                  - s3:PutReplicationConfiguration
+                  - s3:UpdateJobStatus
+                  - s3:GetBucketVersioning
+                  - s3:PutBucketCORS
+                  - s3:GetBucketAcl
+                  - s3:GetBucketNotification
+                  - s3:GetReplicationConfiguration
+                  - s3:PutInventoryConfiguration
+                  - s3:PutBucketNotification
+                  - s3:PutBucketWebsite
+                  - s3:PutBucketRequestPayment
+                  - s3:DescribeJob
+                  - s3:PutBucketLogging
+                  - s3:GetBucketCORS
+                  - s3:GetAnalyticsConfiguration
+                  - s3:PutBucketObjectLockConfiguration
+                  - s3:GetBucketLocation
+                  - s3:ListBucketVersions
+                  - s3:ListBucket
+                  - s3:GetAccountPublicAccessBlock
+                  - s3:ListJobs
+                  - s3:CreateJob
+                  - s3:ListAllMyBuckets
+                  - s3:HeadBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::*${AppCodeLower}*"
+              - Effect: Allow
+                Action:
+                  - lambda:CreateFunction
+                  - lambda:CreateEventSourceMapping
+                  - lambda:ListFunctions
+                  - lambda:PublishLayerVersion
+                  - lambda:PublishVersion
+                  - lambda:PutFunctionConcurrency
+                  - lambda:UpdateAlias
+                  - lambda:UpdateEventSourceMapping
+                  - lambda:UpdateFunctionCode
+                  - lambda:TagResource
+                  - lambda:UntagResource
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:GetFunction
+                  - lambda:GetAlias
+                  - lambda:ListTags
+                  - lambda:ListAliases
+                  - lambda:ListLayerVersions
+                  - lambda:ListLayers
+                  - lambda:DeleteFunction
+                  - lambda:AddPermission
+                  - lambda:RemovePermission
+                  - lambda:InvokeFunction
+                  - lambda:GetLayerVersion
+                  - lambda:GetEventSourceMapping
+                  - lambda:ListEventSourceMappings
+                  - lambda:DeleteEventSourceMapping
+                  - lambda:GetFunctionConfiguration
+                Resource:
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*${AppCodeLower}*"
+              - Effect: Allow
+                Action:
+                  - sqs:CreateQueue
+                  - sqs:DeleteQueue
+                  - sqs:GetQueueAttributes
+                  - sqs:GetQueueUrl
+                  - sqs:ListDeadLetterSourceQueues
+                  - sqs:ListQueues
+                  - sqs:TagQueue
+                  - sqs:ListQueueTags
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:PurgeQueue
+                  - sqs:SetQueueAttributes
+                Resource:
+                  - !Sub "arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:*${AppCodeLower}*"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:UntagResource
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:CancelRotateSecret
+                  - secretsmanager:ListSecretVersionIds
+                  - secretsmanager:UpdateSecret
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:PutResourcePolicy
+                  - secretsmanager:RestoreSecret
+                  - secretsmanager:RotateSecret
+                  - secretsmanager:UpdateSecretVersionStage
+                  - secretsmanager:TagResource
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:DeleteResourcePolicy
+                  - secretsmanager:GetRandomPassword
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:ListLayers
+                  - secretsmanager:ListSecrets
+                  - secretsmanager:UpdateSecret
+                Resource:
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVpcs
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+                  - logs:GetLogEvents
+                  - logs:FilterLogEvents
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendTemplatedEmail
+                  - ses:SendRawEmail
+                Resource:
+                  - !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:*${AppCodeLower}*"

@@ -1,0 +1,366 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Serverless SLWRT Roles Stack
+
+Parameters:
+  AppCode:
+    Type: String
+    Default: ST232
+  AppCodeLower:
+    Type: String
+    Default: st232
+  AppName:
+    Type: String
+    Default: SLWRS
+  AppNameLower:
+    Type: String
+    Default: slwrs
+  TeamName:
+    Type: String
+    Default: team-dynamic
+  Region:
+    Type: String
+    AllowedValues:
+      - us-east-1
+      - us-east-2
+    Default: us-east-1
+  Department:
+    Type: String
+    Default: "Customer Service IT"
+  OwnerContact:
+    Type: String
+    Default: "anand.avadutha@nexteraenergy.com"
+  RolePermissionBoundary:
+    Type: String
+    Default: "arn:aws:iam::977465404123:policy/neeito-app-pb-neeito-build-st232-team-dynamic"
+
+Mappings:
+  AccountIDMap:
+    "237980099910":
+      VPCShortName: FPLSandbox
+      VPCShortNameLower: fplsandbox
+    "977465404123":
+      VPCShortName: FPLDev
+      VPCShortNameLower: fpldev
+    "516627182506":
+      VPCShortName: FPLTest
+      VPCShortNameLower: fpltest
+    "485449107334":
+      VPCShortName: FPLQA
+      VPCShortNameLower: fplqa
+    "430004966399":
+      VPCShortName: FPLProd
+      VPCShortNameLower: fplprod
+    "202055847252":
+      VPCShortName: FPLDR
+      VPCShortNameLower: fpldr
+Resources:
+  SwlrtIdEcr:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${AppCodeLower}/${TeamName}/${AppNameLower}'
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Sid: AllowPushPull
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${AWS::AccountId}:root #fplNonProd
+            Action:
+              - ecr:GetAuthorizationToken
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:GetRepositoryPolicy
+              - ecr:DescribeRepositories
+              - ecr:ListImages
+              - ecr:DescribeImages
+              - ecr:BatchGetImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:PutImage
+      LifecyclePolicy:
+          LifecyclePolicyText: !Sub
+            - |
+              {
+                "rules": [
+                  {
+                    "rulePriority": 1,
+                    "description": "Only keep untagged images for ${DaysToRetainUntaggedImages} days",
+                    "selection": {
+                      "tagStatus": "untagged",
+                      "countType": "sinceImagePushed",
+                      "countUnit": "days",
+                      "countNumber": ${DaysToRetainUntaggedImages}
+                    },
+                    "action": { "type": "expire" }
+                  }
+                ]
+              }
+            - DaysToRetainUntaggedImages: 7
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+  SwlrtIdEcr2:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${AppCodeLower}/${TeamName}/${AppNameLower}/geoserver'
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Sid: AllowPushPull
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${AWS::AccountId}:root #fplNonProd
+            Action:
+              - ecr:GetAuthorizationToken
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:GetRepositoryPolicy
+              - ecr:DescribeRepositories
+              - ecr:ListImages
+              - ecr:DescribeImages
+              - ecr:BatchGetImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:PutImage
+      LifecyclePolicy:
+          LifecyclePolicyText: !Sub
+            - |
+              {
+                "rules": [
+                  {
+                    "rulePriority": 1,
+                    "description": "Only keep untagged images for ${DaysToRetainUntaggedImages} days",
+                    "selection": {
+                      "tagStatus": "untagged",
+                      "countType": "sinceImagePushed",
+                      "countUnit": "days",
+                      "countNumber": ${DaysToRetainUntaggedImages}
+                    },
+                    "action": { "type": "expire" }
+                  }
+                ]
+              }
+            - DaysToRetainUntaggedImages: 7
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+  SwlrtIdEcr3:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${AppCodeLower}/${TeamName}/${AppNameLower}/enginerun'
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Sid: AllowPushPull
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${AWS::AccountId}:root #fplNonProd
+            Action:
+              - ecr:GetAuthorizationToken
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:GetRepositoryPolicy
+              - ecr:DescribeRepositories
+              - ecr:ListImages
+              - ecr:DescribeImages
+              - ecr:BatchGetImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:PutImage
+      LifecyclePolicy:
+          LifecyclePolicyText: !Sub
+            - |
+              {
+                "rules": [
+                  {
+                    "rulePriority": 1,
+                    "description": "Only keep untagged images for ${DaysToRetainUntaggedImages} days",
+                    "selection": {
+                      "tagStatus": "untagged",
+                      "countType": "sinceImagePushed",
+                      "countUnit": "days",
+                      "countNumber": ${DaysToRetainUntaggedImages}
+                    },
+                    "action": { "type": "expire" }
+                  }
+                ]
+              }
+            - DaysToRetainUntaggedImages: 7
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+  SwlrtIdEcr4:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${AppCodeLower}/${TeamName}/${AppNameLower}/prefrences'
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Sid: AllowPushPull
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${AWS::AccountId}:root #fplNonProd
+            Action:
+              - ecr:GetAuthorizationToken
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:GetRepositoryPolicy
+              - ecr:DescribeRepositories
+              - ecr:ListImages
+              - ecr:DescribeImages
+              - ecr:BatchGetImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:PutImage
+      LifecyclePolicy:
+          LifecyclePolicyText: !Sub
+            - |
+              {
+                "rules": [
+                  {
+                    "rulePriority": 1,
+                    "description": "Only keep untagged images for ${DaysToRetainUntaggedImages} days",
+                    "selection": {
+                      "tagStatus": "untagged",
+                      "countType": "sinceImagePushed",
+                      "countUnit": "days",
+                      "countNumber": ${DaysToRetainUntaggedImages}
+                    },
+                    "action": { "type": "expire" }
+                  }
+                ]
+              }
+            - DaysToRetainUntaggedImages: 7
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+  SwlrtIdEcr5:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${AppCodeLower}/${TeamName}/${AppNameLower}/backendjava'
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Sid: AllowPushPull
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${AWS::AccountId}:root #fplNonProd
+            Action:
+              - ecr:GetAuthorizationToken
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:GetRepositoryPolicy
+              - ecr:DescribeRepositories
+              - ecr:ListImages
+              - ecr:DescribeImages
+              - ecr:BatchGetImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:PutImage
+      LifecyclePolicy:
+          LifecyclePolicyText: !Sub
+            - |
+              {
+                "rules": [
+                  {
+                    "rulePriority": 1,
+                    "description": "Only keep untagged images for ${DaysToRetainUntaggedImages} days",
+                    "selection": {
+                      "tagStatus": "untagged",
+                      "countType": "sinceImagePushed",
+                      "countUnit": "days",
+                      "countNumber": ${DaysToRetainUntaggedImages}
+                    },
+                    "action": { "type": "expire" }
+                  }
+                ]
+              }
+            - DaysToRetainUntaggedImages: 7
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+  SwlrtIdEcr6:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${AppCodeLower}/${TeamName}/${AppNameLower}/uiintegration'
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Sid: AllowPushPull
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${AWS::AccountId}:root #fplNonProd
+            Action:
+              - ecr:GetAuthorizationToken
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:GetRepositoryPolicy
+              - ecr:DescribeRepositories
+              - ecr:ListImages
+              - ecr:DescribeImages
+              - ecr:BatchGetImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:PutImage
+      LifecyclePolicy:
+          LifecyclePolicyText: !Sub
+            - |
+              {
+                "rules": [
+                  {
+                    "rulePriority": 1,
+                    "description": "Only keep untagged images for ${DaysToRetainUntaggedImages} days",
+                    "selection": {
+                      "tagStatus": "untagged",
+                      "countType": "sinceImagePushed",
+                      "countUnit": "days",
+                      "countNumber": ${DaysToRetainUntaggedImages}
+                    },
+                    "action": { "type": "expire" }
+                  }
+                ]
+              }
+            - DaysToRetainUntaggedImages: 7
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+
+
+
+Outputs:
+  SwlrtEcrARN:
+    Description: Slwrt Identification ECR Repo Arn
+    Value: !GetAtt SwlrtIdEcr.Arn
+  SwlrtEcrARN2:
+    Description: Slwrt Identification ECR Repo Arn
+    Value: !GetAtt SwlrtIdEcr2.Arn
+  SwlrtEcrARN3:
+    Description: Slwrt Identification ECR Repo Arn
+    Value: !GetAtt SwlrtIdEcr3.Arn
+  SwlrtEcrARN4:
+    Description: Slwrt Identification ECR Repo Arn
+    Value: !GetAtt SwlrtIdEcr4.Arn
+  SwlrtEcrARN5:
+    Description: Slwrt Identification ECR Repo Arn
+    Value: !GetAtt SwlrtIdEcr5.Arn
+  SwlrtEcrARN6:
+    Description: Slwrt Identification ECR Repo Arn
+    Value: !GetAtt SwlrtIdEcr6.Arn

@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Serverless SLWRT Roles Stack
+
+Parameters:
+  AppCode:
+    Type: String
+    Default: ST232
+  AppCodeLower:
+    Type: String
+    Default: st232
+  AppName:
+    Type: String
+    Default: SLWRS
+  AppNameLower:
+    Type: String
+    Default: slwrs
+  TeamName:
+    Type: String
+    Default: team-dynamic
+  Region:
+    Type: String
+    AllowedValues:
+      - us-east-1
+      - us-east-2
+    Default: us-east-1
+  Department:
+    Type: String
+    Default: "Customer Service IT"
+  OwnerContact:
+    Type: String
+    Default: "anand.avadutha@nexteraenergy.com"
+  RolePermissionBoundary:
+    Type: String
+    Default: "arn:aws:iam::977465404123:policy/neeito-app-pb-neeito-build-st232-team-dynamic"
+
+Mappings:
+  AccountIDMap:
+    "237980099910":
+      VPCShortName: FPLSandbox
+      VPCShortNameLower: fplsandbox
+    "977465404123":
+      VPCShortName: FPLDev
+      VPCShortNameLower: fpldev
+    "516627182506":
+      VPCShortName: FPLTest
+      VPCShortNameLower: fpltest
+    "485449107334":
+      VPCShortName: FPLQA
+      VPCShortNameLower: fplqa
+    "430004966399":
+      VPCShortName: FPLProd
+      VPCShortNameLower: fplprod
+    "202055847252":
+      VPCShortName: FPLDR
+      VPCShortNameLower: fpldr
+
+Resources:
+  ECRRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      RoleName: !Sub "${AppCodeLower}-${TeamName}-ECR-Role"
+      PermissionsBoundary: !Ref RolePermissionBoundary
+      Policies:
+        - PolicyName: !Sub "${AppCodeLower}-${TeamName}-ECR-Policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:DescribeImages
+                  - ecr:DescribeRepositories
+                  - ecr:ListImages
+                  - ecr:GetRepositoryPolicy
+                  - ecr:CompleteLayerUpload
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetAuthorizationToken
+               Resource:
+                  - !Sub "arn:aws:ecr:*:*:repository/*${AppCodeLower}*"
+            
+      Tags:
+        - Key: AppCode
+          Value: !Sub ${AppCode}

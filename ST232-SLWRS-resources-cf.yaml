@@ -1,0 +1,71 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless SLWRT Resources Stack
+
+Parameters:
+  AppCode:
+    Type: String
+    Default: ST232
+  AppCodeLower:
+    Type: String
+    Default: st232
+  AppName:
+    Type: String
+    Default: SLWRS
+  AppNameLower:
+    Type: String
+    Default: slwrs
+  Region:
+    Type: String
+    AllowedValues:
+      - us-east-1
+      - us-east-2
+    Default: us-east-1
+  Department:
+    Type: String
+    Default: "Customer Service IT"
+  OwnerContact:
+    Type: String
+    Default: "anand.avadutha@nexteraenergy.com"
+Mappings:
+  AccountIDMap:
+    "237980099910":
+      VPCShortName: FPLSandbox
+      VPCShortNameLower: fplsandbox
+    "977465404123":
+      VPCShortName: FPLDev
+      VPCShortNameLower: fpldev
+    "516627182506":
+      VPCShortName: FPLTest
+      VPCShortNameLower: fpltest
+    "485449107334":
+      VPCShortName: FPLQA
+      VPCShortNameLower: fplqa
+    "430004966399":
+      VPCShortName: FPLProd
+      VPCShortNameLower: fplprod
+    "202055847252":
+      VPCShortName: FPLDR
+      VPCShortNameLower: fpldr
+
+Resources:
+  BackEndBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub:
+          - 2${AccountCodeLower}${Region}-${AppCodeLower}-${AppNameLower}-s3
+          - AccountCodeLower: !ImportValue Account-Global-AccountCodeLower
+            Region:
+              Fn::ImportValue: !Sub "Account-Global-RegionCodeLower-${AWS::Region}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: AppCode
+          Value: !Sub ${AppCode}
+        - Key: AppName
+          Value: !Sub ${AppName}

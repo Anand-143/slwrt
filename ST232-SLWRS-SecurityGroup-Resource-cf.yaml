@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Serverless SLWRT Resources Stack
+
+Parameters:
+  AppCode:
+    Type: String
+    Default: ST232
+  AppCodeLower:
+    Type: String
+    Default: st232
+  AppName:
+    Type: String
+    Default: SLWRS
+  AppNameLower:
+    Type: String
+    Default: slwrs
+  Region:
+    Type: String
+    AllowedValues:
+      - us-east-1
+      - us-east-2
+    Default: us-east-1
+  Department:
+    Type: String
+    Default: "Customer Service IT"
+  OwnerContact:
+    Type: String
+    Default: "anand.avadutha@nexteraenergy.com"
+  RolePermissionBoundary:
+    Type: String
+    Default: "arn:aws:iam::977465404123:policy/neeito-app-pb-neeito-build-st232-team-dynamic"
+Mappings:
+  AccountIDMap:
+    "237980099910":
+      VPCShortName: FPLSandbox
+      VPCShortNameLower: fplsandbox
+    "977465404123":
+      VPCShortName: FPLDev
+      VPCShortNameLower: fpldev
+    "516627182506":
+      VPCShortName: FPLTest
+      VPCShortNameLower: fpltest
+    "485449107334":
+      VPCShortName: FPLQA
+      VPCShortNameLower: fplqa
+    "430004966399":
+      VPCShortName: FPLProd
+      VPCShortNameLower: fplprod
+    "202055847252":
+      VPCShortName: FPLDR
+      VPCShortNameLower: fpldr
+Resources:
+  L4RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Layer 4 Security Group for RDS Instance'
+      GroupName: !Join
+        - '-'
+        - - L4
+          - !Ref AppCodeLower
+          - SLWRS-RDS
+          - !FindInMap [AccountIDMap, !Ref "AWS::AccountId", VPCShortName]
+          - !ImportValue Account-Global-AccountCode
+          - SG
+      VpcId: 
+        Fn::ImportValue: !Join ["-", ["VPC", !FindInMap [AccountIDMap, !Ref "AWS::AccountId", VPCShortName], "VPCID"]] 
+      SecurityGroupIngress:
+        - IpProtocol: TCP
+          CidrIp: 10.0.0.0/8
+          FromPort: 5605
+          ToPort: 5605
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+  SelfInboundRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: 
+      IpProtocol: TCP
+      FromPort: 5605
+      Description: To accept the  traffic from lambda  to  RDSPostgre
+      ToPort: 5605
+      GroupId: !Ref L4LambdaSecurityGroup
+      SourceSecurityGroupId: !Ref L4LambdaSecurityGroup
+  L4LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Layer 4 Security Group for LAMBDA'
+      GroupName: !Join
+        - '-'
+        - - L4
+          - !Ref AppCode
+          - MDM-Lambda
+          - !FindInMap [AccountIDMap, !Ref "AWS::AccountId", VPCShortName]
+          - !ImportValue Account-Global-AccountCode
+          - SG
+      VpcId: 
+        Fn::ImportValue: !Join ["-", ["VPC", !FindInMap [AccountIDMap, !Ref "AWS::AccountId", VPCShortName], "VPCID"]] 
+      SecurityGroupIngress:
+        - IpProtocol: TCP
+          CidrIp: 10.195.64.0/20
+          FromPort: 465
+          ToPort: 465
+      SecurityGroupEgress:
+        - IpProtocol: TCP
+          Description: Allow outbound traffic to  Postgres RDS Proxy
+          CidrIp: 10.0.0.0/8
+          FromPort: 5605
+          ToPort: 5605
+      Tags:
+        - Key: AppCode
+          Value: !Ref AppCode
+Outputs:
+  RDSProxySG:
+    Description: L4 RDS Proxy Security group
+    Value: !GetAtt L4RDSSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AppCode}-RDS-DB-L4-SG"
+  LambdaSG:
+    Description: L4 Lambda Security group
+    Value: !GetAtt L4LambdaSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AppCode}-Lambda-L4-SG"
+
